@@ -9,14 +9,20 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"github.com/ets-log795/drone-code/ui"
 )
 
 func main() {
 	// Ability to set address and port from command args (go main.go --addr=<address>)
 	addr := flag.String("addr", ":9000", "server address (host:port)")
+	uiPort := flag.String("ui", ":8081", "web UI port (host:port)")
 	flag.Parse()
+
 	// Add better log prefix
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	// Start the Web UI (runs independently of the TCP client)
+	go ui.StartWebUI(*uiPort) // http://192.168.8.1:8081 by default
 
 	// Graceful shutdown when force closing the program
 	sig := make(chan os.Signal, 1)
@@ -33,10 +39,10 @@ func main() {
 	// Reconnection loop
 	for {
 		select {
-			case <-sig:
-				log.Println("exiting")
-				return
-			default:
+		case <-sig:
+			log.Println("exiting")
+			return
+		default:
 		}
 
 		conn, err = dial()
@@ -71,9 +77,9 @@ func run(c net.Conn) {
 	if cw, ok := c.(closeWriter); ok {
 		_ = cw.CloseWrite()
 	}
-	
+
 	select {
-		case <-done:
-		case <-time.After(500 * time.Millisecond):
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
 	}
 }
