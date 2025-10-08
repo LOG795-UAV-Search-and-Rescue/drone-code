@@ -68,4 +68,51 @@ while True:
 
 
 
+Before running the Go program, make sure the following steps are done on the VOXL:
+
+1. Configure cameras
+sudo voxl-configure-cameras
+sudo reboot
+
+2. Camera server running
+
+After reboot, check:
+voxl-inspect-services | grep camera
+You should see:
+voxl-camera-server | Enabled | Running
+
+
+3. QVIO server running
+voxl-inspect-services | grep qvio
+
+Should show:
+voxl-qvio-server | Enabled | Running
+
+
+Verify pose stream:
+sudo voxl-inspect-qvio
+
+Expected output (state OKAY, quality > 0, features > 0):
+dt(ms) | T_imu_wrt_vio (m) | Roll Pitch Yaw (deg) | features | quality | state | error_codes
+
+4. Vision hub running
+voxl-inspect-services | grep vision
+Should see:
+voxl-vision-hub | Enabled | Running
+
+5. MAVLink bridge enabled
+
+Ensure voxl-vision-px4 is enabled (this publishes odometry over UDP):
+voxl-inspect-services | grep px4
+If not running:
+sudo systemctl enable voxl-vision-px4
+sudo systemctl start voxl-vision-px4
+
+By default it publishes to udp://0.0.0.0:14550.
+
+Then you should be ready to send a go file into the drone using the command:
+
+scp *name of the file* voxl@192.168.8.1:/PFE/code/
+
+
 
