@@ -35,9 +35,9 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 	m := webrtc.MediaEngine{}
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:     webrtc.MimeTypeH264,
-			ClockRate:    90000,
-			SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+			MimeType: webrtc.MimeTypeH264,
+			ClockRate: 90000,
+			SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
 			RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "goog-remb"}, {Type: "ccm", Parameter: "fir"}},
 		},
 		PayloadType: webrtc.PayloadType(96),
