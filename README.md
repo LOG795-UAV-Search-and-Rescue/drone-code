@@ -115,4 +115,20 @@ Then you should be ready to send a go file into the drone using the command:
 scp *name of the file* voxl@192.168.8.1:/PFE/code/
 
 
+NEW STEPS CHECK THAT QVIO IS RUNNING
+
+# check VOXL modal services
+voxl-inspect-services
+
+# check qVIO service specifically
+systemctl status voxl-qvio-server
+
+# an easy inspect tool to show qVIO output
+voxl-inspect-qvio
+
+SHOULD SEE SOMETHING LIKE THIS WITH QUALITY COLUMN :
+T_imu_wrt_vio (m)   |Roll Pitch Yaw (deg)| state| error_code
+ -4.96    0.94   -0.00|  17.9  -52.3    9.3| OKAY |
+
+**CAREFUL IF QUALITY IS TOO LOW POSITION RESETS SO X,Y,Z GOES BACK TO 0
 
