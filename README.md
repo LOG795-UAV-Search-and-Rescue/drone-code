@@ -130,6 +130,19 @@ SHOULD SEE SOMETHING LIKE THIS WITH QUALITY COLUMN :
 T_imu_wrt_vio (m)   |Roll Pitch Yaw (deg)| state| error_code
  -4.96    0.94   -0.00|  17.9  -52.3    9.3| OKAY |
 
+## POUR LANCER LE SCRIPT
+
+cd ..
+cd ..
+cd PFE/code
+METTRE LA BONNE ADRESSE IP DANS LE CODE
+sudo nano read_vio_send_udp.py
+Apres avoir changer ladresse ip lancer le script
+python3 read_vio_send_udp.py
+
+##Sur le PC lancer le script
+python rover_follow_sim.py
+
 **CAREFUL IF QUALITY IS TOO LOW POSITION RESETS SO X,Y,Z GOES BACK TO 0
 
 ## WELL HAVE TO ADD A LOGIC WHEN THE POSITIONNING RESETS TO 0 WHEN QUALITY IS VERY LOW, THEN MAYBE TELL TO THE ROVER THAT ITS THE NEW 0,0 Position in X,Y
