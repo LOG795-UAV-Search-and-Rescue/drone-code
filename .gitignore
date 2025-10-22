@@ -1,0 +1,4 @@
+drone-code-offline.tar.gz
+vendor/
+drone-code
+.DS_Store

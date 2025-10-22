@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <title>Drone UI</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <header>
+            <h1>Drone Interface</h1>
+        </header>
+
+        <main>
+            <section class="video-card">
+                <video id="video" autoplay playsinline muted></video>
+                <div class="controls">
+                    <button id="connectBtn">Connect</button>
+                    <button id="disconnectBtn" disabled>Disconnect</button>
+                    <span id="status" class="status">idle</span>
+                </div>
+            </section>
+            <section class="actions">
+                <button id="callUgvBtn" class="primary">Call UGV robot</button>
+                <pre id="log" class="log"></pre>
+            </section>
+        </main>
+
+        <footer><small>Lightweight UI to control the robot made by the best <strong>PFE</strong> team!</small></footer>
+
+        <script src="/static/app.js"></script>
+    </body>
+</html>

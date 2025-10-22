@@ -1,114 +1,137 @@
 package main
 
 import (
-	"context"
+	"embed"
 	"flag"
 	"io"
 	"log"
 	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/ets-log795/drone-code/ui"
 )
 
+const (
+	uiListenAddr   = ":8080"                 // UI HTTP listen address
+	mediaMTXOrigin = "http://127.0.0.1:8889" // MediaMTX origin on the DRONE
+)
+
+//go:embed static/*
+var staticFS embed.FS
+
+func startUIServer() *http.Server {
+	mux := http.NewServeMux()
+
+	// Serve /static/ files on path "/"
+	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+
+	// Serve api endpoints on path "/api"
+	mux.HandleFunc("/api/call-ugv", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[UI] Call UGV pressed at %s from %s", time.Now().Format(time.RFC3339), r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"message":"UGV call requested (logged on server)"}`))
+	})
+
+	// Proxy WHEP to MediaMTX
+	u, err := url.Parse(mediaMTXOrigin)
+	if err != nil {
+		log.Fatalf("invalid mediaMTXOrigin: %v", err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(u)
+
+	// Make sure to catch the right endpoint for the whep stream even with different url formats
+	mux.Handle("/whep/", proxy)
+	mux.Handle("/drone/whep", proxy)
+	mux.Handle("/drone/whep/", proxy)
+
+	srv := &http.Server{
+		Addr:    uiListenAddr,
+		Handler: mux,
+	}
+
+	go func() {
+		log.Printf("UI listening on %s", uiListenAddr)
+		log.Printf("Proxying /whep/* and /drone/whep* -> %s", mediaMTXOrigin)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("ui server error: %v", err)
+		}
+	}()
+
+	return srv
+}
+
+// TCP Client (To communicate with the UGV robot)
 func main() {
-	const DEFAULT_ROBOT_ADDRESS = "192.168.8.2:9000"
-	const DEFAULT_WEB_UI_ADDRESS = "0.0.0.0:8080"
-	const DEFAULT_RTSP_ADDRESS = "rtsp://127.0.0.1:8900/live"
-
-	// Ability to set address and port from command args (go main.go --addr=<address>)
-	serverAddr := flag.String("addr", DEFAULT_ROBOT_ADDRESS, "server address (host:port)")
-	uiAddr := flag.String("ui", DEFAULT_WEB_UI_ADDRESS, "web UI address (host:port)")
-	rtspAddr := flag.String("rtsp", DEFAULT_RTSP_ADDRESS, "RTSP address for WebRTC (host:port)")
+	addr := flag.String("addr", ":9000", "server address (host:port)")
 	flag.Parse()
-
 	// Add better log prefix
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
 	// Graceful shutdown when force closing the program
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start the Web UI (runs independently of the TCP client)
-	go ui.StartWebUI(*uiAddr, *rtspAddr)
+	// Start the UI server
+	uiServer := startUIServer()
 
 	// Initiate connection to the server (UGV robot)
+	var conn net.Conn
+	var err error
 	dial := func() (net.Conn, error) {
 		dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
-		return dialer.Dial("tcp", *serverAddr)
+		return dialer.Dial("tcp", *addr)
 	}
 
 	// Reconnection loop
 	for {
 		select {
-		case <-ctx.Done():
+		case <-sig:
 			log.Println("exiting")
-			ui.StopWebUI()
+			// Close UI server listener
+			_ = uiServer.Close()
 			return
 		default:
 		}
 
-		var conn, err = dial()
+		conn, err = dial()
 		if err != nil {
 			log.Printf("connection failed: %v (retrying in 2s)", err)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After((2 * time.Second)):
-				continue
-			}
+			time.Sleep(2 * time.Second)
+			continue
 		}
+		log.Printf("connected to %s", *addr)
+		run(conn)
 
-		log.Printf("connected to %s", *serverAddr)
-		run(ctx, conn)
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
-			log.Println("disconnected; reconnecting ...")
-		}
+		log.Println("disconnected; reconnecting in 2s ...")
+		time.Sleep(2 * time.Second)
 	}
 }
 
-func run(ctx context.Context, c net.Conn) {
+func run(c net.Conn) {
 	defer c.Close()
 
-	// Reader: socket -> stdout
-	readDone := make(chan error, 1)
+	// Pipe: socket -> stdout
+	done := make(chan struct{}, 1)
 	go func() {
-		_, err := io.Copy(os.Stdout, c)
-		readDone <- err
+		_, _ = io.Copy(os.Stdout, c)
+		done <- struct{}{}
 	}()
 
-	// Writer: stdin -> socket
-	writeDone := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(c, os.Stdin)
-		writeDone <- err
-	}()
+	// Pipe: stdin -> socket
+	_, _ = io.Copy(c, os.Stdin)
 
-	// Wait for any type of shutdown or read/write to finish
-	select {
-	case <-ctx.Done():
-		_ = c.SetDeadline(time.Now())
-		_ = c.Close()
-	case <-readDone:
-	case <-writeDone:
-		type closeWriter interface{ closeWrite() error }
-
-		if cw, ok := c.(closeWriter); ok {
-			_ = cw.closeWrite()
-		}
+	// If stdin hits EOF, close write so the server sees it and then wait a moment.
+	type closeWriter interface{ CloseWrite() error }
+	if cw, ok := c.(closeWriter); ok {
+		_ = cw.CloseWrite()
 	}
 
-	// Give the other goroutine a moment to exit cleanly
 	select {
-	case <-readDone:
-	case <-writeDone:
-	case <-time.After(300 * time.Millisecond):
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
 	}
 }
