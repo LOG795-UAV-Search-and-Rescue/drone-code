@@ -5,18 +5,18 @@ import time
 import socket
 
 # === CONFIG ===
-PC_IP = "192.168.8.13"     # Your PC IP
+PC_IP = "192.168.8.13"     # Your PC IP, WILL BE CHNAGED TO THE ROVER DW
 UDP_PORT = 5005            # UDP Port
 
-# UDP socket setup
+
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# Same command as before
+# NEED SUDO TO ACCESS DATA IN QVIO PIPELINE
 CMD = ["sudo", "voxl-inspect-qvio"]
 
-# Regex to extract X, Y, Z (pose)
+# to extract x,y,z thats all
 pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
-# Regex to extract quality percentage
+
 quality_regex = re.compile(r"\|\s*\d+\s*\|\s*(\d+)%")
 
 print(f"[VOXL] Streaming VIO data via UDP to {PC_IP}:{UDP_PORT} (Ctrl+C to exit)")
@@ -45,11 +45,11 @@ try:
             ts = time.time()
             quality = quality_match.group(1) if quality_match else "-"
 
-            # Format packet as CSV-style plain text
+            
             packet = f"{ts:.3f},{x:.3f},{y:.3f},{quality}"
-            print(f"[LOCAL] {packet}")  # Still print locally for debug
+            print(f"[LOCAL] {packet}")  
 
-            # Send via UDP
+       
             sock.sendto(packet.encode(), (PC_IP, UDP_PORT))
 
 except KeyboardInterrupt:
