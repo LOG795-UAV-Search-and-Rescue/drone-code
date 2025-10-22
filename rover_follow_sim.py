@@ -32,7 +32,7 @@ print(f"[PC] Listening for drone VIO data on port {DRONE_PORT}")
 print(f"[PC] Sending rover JSON commands to {INTERFACE_IP}:{INTERFACE_PORT}\n")
 
 # =====================================================
-# VISUALIZATION
+# LIL UI BY ME
 # =====================================================
 fig, ax = plt.subplots()
 ax.set_xlim(-VISUAL_SCALE, VISUAL_SCALE)
@@ -48,13 +48,13 @@ ax.legend()
 # RECEIVE DRONE DATA (ROBUST)
 # =====================================================
 def receive_drone_data():
-    """Read *latest* drone VIO packet, discarding older ones if backlog exists."""
+    """LOGIC HERE DISCARD OLD PACKETS WE TAKE ONLY RECENT ONES TRUST """
     global drone_x, drone_y, quality
     try:
         recv_sock.setblocking(0)
         latest_msg = None
 
-        # Drain the socket buffer completely
+       
         while True:
             ready, _, _ = select.select([recv_sock], [], [], 0)
             if not ready:
@@ -62,7 +62,7 @@ def receive_drone_data():
             data, _ = recv_sock.recvfrom(1024)
             latest_msg = data
 
-        # Parse only the latest valid packet
+        
         if latest_msg is None:
             return
 
@@ -83,7 +83,7 @@ def receive_drone_data():
         print("[ERROR receiving data]", e)
 
 # =====================================================
-# CONTROL ROVER
+# HERE WE CONTROL ROVER SIM
 # =====================================================
 def control_rover():
     global rover_x, rover_y, drone_x, drone_y
@@ -105,13 +105,13 @@ def control_rover():
 
     print(f"[CMD] {cmd} | Drone=({drone_x:.3f}, {drone_y:.3f}) | Q={quality:.0f}")
 
-    # Simulate rover motion
+    
     step = 0.1
     rover_x += step * (drone_x - rover_x)
     rover_y += step * (drone_y - rover_y)
 
 # =====================================================
-# ANIMATION
+# MORE UI STUFF
 # =====================================================
 def update(frame):
     receive_drone_data()
@@ -123,3 +123,4 @@ def update(frame):
 
 ani = FuncAnimation(fig, update, interval=100, cache_frame_data=False)
 plt.show()
+
