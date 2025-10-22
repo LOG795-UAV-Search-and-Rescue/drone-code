@@ -130,7 +130,7 @@ SHOULD SEE SOMETHING LIKE THIS WITH QUALITY COLUMN :
 T_imu_wrt_vio (m)   |Roll Pitch Yaw (deg)| state| error_code
  -4.96    0.94   -0.00|  17.9  -52.3    9.3| OKAY |
 
-## POUR LANCER LE SCRIPT
+## POUR LANCER LE SCRIPT (sur le drone)
 
 cd ..
 cd ..
@@ -140,7 +140,7 @@ sudo nano read_vio_send_udp.py
 Apres avoir changer ladresse ip lancer le script
 python3 read_vio_send_udp.py
 
-##Sur le PC lancer le script
+##Pour lancer le script (sur le PC)
 python rover_follow_sim.py
 
 **CAREFUL IF QUALITY IS TOO LOW POSITION RESETS SO X,Y,Z GOES BACK TO 0
