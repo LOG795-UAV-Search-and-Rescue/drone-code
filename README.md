@@ -60,7 +60,7 @@ voxl-inspect-services | grep qvio
 sudo voxl-inspect-qvio
 ```
 
-✅ Expect moving pose, `OKAY`, quality > 0.
+Expect moving pose, `OKAY`, quality > 0.
 
 ### 4. Copy VIO export script to VOXL
 
