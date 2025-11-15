@@ -4,91 +4,99 @@ Code running on the Starling 2 Max with VOXL 2 drone.
 
 ## Getting started
 
-### Requirements
+### Requirements (Local machine)
 
 In order to run the code in this repository, you'll need the following dependencies :
 
-- **Go** (also known as GoLang) - version 1.25.1 is recommended
+- **Python 3.10+**
+- Access to the drone's network (VOXL-xxxxxx, password: `1234567890`) 
+- Drone SSH/SCP login:
+  - **user**: `voxl`
+  - **password**: `voxl`
 
-### Local development
+### Running locally
 
-To run the code in your local environment, you can use :
-
-```shell
-cd client # No need if you are already in the client/ folder
-go run main.go
+From the `client/` folder:
+```bash
+python3 main.py
 ```
 
-### Production-ready code
+UI will be available at:
+```shell
+http://localhost:8080
+```
 
-In order to use the full potential of `Go`, it's important to build the application by following the instructions below carefully.
+WHEP proxy will forward to:
+```shell
+http://127.0.0.1:8889
+```
 
-> [!IMPORTANT]
-> Make sure that you are in the `client/` folder when following the steps below.
-> ```shell
-> cd client # If you are at the root of the project
-> ```
+### Preparing a Full Offline Package
 
-1. First, from the `client/` folder, tidy and update the `vendor/` folder :
+Since the drone is **offline**, you must send **all source files** at once.
 
+- Create the offline bundle
+    
+    From inside the `client/` folder:
     ```shell
-    go mod tidy
-    go mod vendor
-    ```
+    rm -f drone-ui-offline.tar.gz
 
-2. Create an offline bundle (source + vendor), excluding junk :
-
-    ```shell
-    rm -rf drone-code-offline.tar.gz
     tar --exclude='.git' \
-        --exclude='bin' \
         --exclude='.idea' \
         --exclude='.vscode' \
         --exclude='.DS_Store' \
-        -czf drone-code-offline.tar.gz .
+        --exclude='send_to_drone.sh' \
+        -czf drone-ui-offline.tar.gz .
     ```
 
-> [!WARNING]
-> For the following steps, make sure that you are on the `VOXL-476723235` Wi-Fi when running the command below (password for that Wi-Fi is : `1234567890`).
->
-> Also, the password for the user `voxl` connecting to the drone via **SCP/SSH** is : `voxl`.
-
-3. Copy the offline-ready files to the drone :
-
+    This produces:
     ```shell
-    scp drone-code-offline.tar.gz voxl@192.168.8.1:/PFE/code
+    drone-ui-offline.tar.gz
     ```
 
-4. Build the project on the drone :
+### Sending the Package to the drone
 
-    In order to build the production-read code on the drone, you'll first want to SSH into it like this :
-    ```shell
-    ssh voxl@192.168.8.1
-    ```
+> [!IMPORTANT]
+> You must be connected to the drone's Wi-Fi:\
+> SSID/name: `VOXL-476723235`\
+> Password: `1234567890`
 
-    Once you are inside the drone's terminal, you'll want to go to the folder where the code was uploaded and unzip the `tar.gz` :
-    ```shell
-    cd /PFE/code
-    mkdir -p client
-    tar -xzf drone-code-offline.tar.gz -C client --overwrite
-    ```
-
-    Then finally, go in the output folder and build the project like this :
-    ```shell
-    cd client
-    go build
-    ```
-
-This will create a file named `drone-code` in the same directory.\
-That file represents the built application that you can then run on any `VOXL2` drone.
-
-To run the built code, run the following command in the directory where the build file is in your file system :
-
+Send the offline package:
 ```shell
-./drone-code
+scp drone-ui-offline.tar.gz voxl@192.168.8.1:/PFE/code
 ```
 
-The backend communication client will then run on `192.168.8.1:9000` and the web interface on `192.168.8.1:8081` by default.\
-These values can be changed by using the `--addr <your-address:and-port>` flag after the `go run` command or simply after the executable call.
+Enter password: `voxl`
+
+### Installing & Running on the Drone
+
+SSH into the drone:
+```
+ssh voxl@192.168.8.1
+```
+
+Extract the package:
+```shell
+cd /PFE/code
+rm -rf client
+mkdir client
+tar -xzf drone-ui-offline.tar.gz -C client --overwrite
+```
+
+Run the Python server:
+```shell
+cd client
+python3 main.py
+```
+
+The UI will be accessible from your computer on:
+```shell
+http://192.168.8.1:8080
+```
+
+The UI uses `/drone/whep` which the Python server will proxy to MediaMTX running locally on VOXL2:
+```shell
+http://127.0.0.1:8889/whep
+```
 
 > Made with care by [Adam Mihajlovic](https://github.com/Funnyadd), [Maxence Lord](https://github.com/ImprovUser) and [Raphaël Camara](https://github.com/RaphaelCamara) ❤️
