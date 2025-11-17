@@ -8,7 +8,7 @@ Code running on the Starling 2 Max with VOXL 2 drone.
 
 In order to run the code in this repository, you'll need the following dependencies :
 
-- **Python 3.10+**
+- **Python 3.6.9+**
 - Access to the drone's network (VOXL-xxxxxx, password: `1234567890`) 
 - Drone SSH/SCP login:
   - **user**: `voxl`
