@@ -2,7 +2,8 @@
 import json
 import http.client
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from pathlib import Path
 
 UI_LISTEN_ADDR = "0.0.0.0:8080"
@@ -22,6 +23,9 @@ if ORIGIN.hostname is None:
 ORIGIN_HOST = ORIGIN.hostname
 ORIGIN_SCHEME = ORIGIN.scheme
 ORIGIN_PORT = ORIGIN.port or (443 if ORIGIN_SCHEME == "https" else 80)
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
 def filter_headers(headers):
     out = {}
@@ -49,7 +53,8 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_file("index.html")
             return
         if self.path.startswith("/static/"):
-            rel = self.path.removeprefix("/static/")
+            prefix = "/static/"
+            rel = self.path[len(prefix):] if self.path.startswith(prefix) else self.path
             self.serve_file(rel)
             return
         if self.is_whep_path():
@@ -142,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
         except Exception as e:
-            self.send_error(502, f"MediaMTX upstream error: {e}")
+            self.send_error(502, "MediaMTX upstream error: %s" % e)
         finally:
             if conn is not None:
                 try:
@@ -153,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_example_call(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length) if length > 0 else b""
-        try: 
+        try:
             payload = json.loads(body.decode("utf-8")) if body else {}
         except Exception:
             payload = {}
@@ -174,10 +179,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     address = UI_LISTEN_ADDR.split(":")
-    host = address[0] 
+    host = address[0]
     port = int(address[1])
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"UI listening on {UI_LISTEN_ADDR}")
+    print("UI listening on %s" % UI_LISTEN_ADDR)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
