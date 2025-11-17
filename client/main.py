@@ -77,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
-    def is_whep_path(self) -> bool:
+    def is_whep_path(self):
         p = self.path
         return (
             p.startswith("/whep/") or
@@ -85,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
             p.startswith("/drone/whep/")
         )
 
-    def serve_file(self, rel: str):
+    def serve_file(self, rel):
         fpath = STATIC_DIR / rel
         if not fpath.is_file():
             self.send_error(404)
@@ -111,14 +111,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def proxy_whep(self):
         incoming = urllib.parse.urlsplit(self.path)
-        path = incoming.path
-
-        if path == "/drone/whep":
-            path = "/whep"
-        elif path.startswith("/drone/whep/"):
-            path = "/whep" + path[len("/drone/whep"):]
-
-        target_url = ORIGIN._replace(path=path, query=incoming.query or "").geturl()
+        target_url = ORIGIN._replace(
+            path=incoming.path,
+            query=incoming.query or ""
+        ).geturl()
 
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length) if length > 0 else None
