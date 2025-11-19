@@ -7,15 +7,33 @@ import threading
 import sys
 import termios
 import tty
+import getpass
 
 # === CONFIG ===
-PC_IP = "192.168.8.13"          # CHANGE before flight
-UDP_PORT = 5005                 # UDP Port to send pose + commands
-
+PC_IP = "192.168.8.13"          # CHANGE IP HEREEEE
+UDP_PORT = 5005                 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# Command: read qvio values
-CMD = ["sudo", "voxl-inspect-qvio"]
+print("This script requires sudo privileges.")
+sudo_password = getpass.getpass("Enter sudo password: ")
+
+# Sudo
+test = subprocess.run(
+    ["sudo", "-S", "echo", "OK"],
+    input=sudo_password + "\n",
+    text=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE
+)
+
+if "OK" not in test.stdout:
+    print(" Wrong sudo password. Exiting.")
+    sys.exit(1)
+
+print("Sudo authentication successful.\n")
+
+# Command: read qvio values (non-interactive sudo)
+CMD = ["sudo", "-S", "voxl-inspect-qvio"]
 
 pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
 quality_regex = re.compile(r"\|\s*\d+\s*\|\s*(\d+)%")
@@ -30,7 +48,6 @@ print("  Ctrl+C = Stop\n")
 
 # === Key listener utilities ===
 def getch():
-    """Non-blocking single key reader"""
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -57,9 +74,17 @@ threading.Thread(target=key_listener, daemon=True).start()
 
 # === Stream VIO ===
 proc = subprocess.Popen(
-    CMD, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-    universal_newlines=True, bufsize=1
+    CMD,
+    stdin=subprocess.PIPE,     # to send sudo password
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    universal_newlines=True,
+    bufsize=1
 )
+
+# Send SUDO PASSWORD
+proc.stdin.write(sudo_password + "\n")
+proc.stdin.flush()
 
 try:
     for line in proc.stdout:
