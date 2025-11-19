@@ -10,7 +10,7 @@ import tty
 import getpass
 
 # === CONFIG ===
-PC_IP = "192.168.8.13"          
+PC_IP = "192.168.8.2"          
 UDP_PORT = 5005                 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -110,3 +110,4 @@ except KeyboardInterrupt:
 finally:
     proc.terminate()
     sock.close()
+
