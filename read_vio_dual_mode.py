@@ -20,7 +20,6 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 print("This script requires sudo privileges.")
 sudo_password = getpass.getpass("Enter sudo password: ")
 
-# === Test sudo password (Python 3.6 FIX) ===
 test = subprocess.run(
     ["sudo", "-S", "echo", "OK"],
     input=sudo_password + "\n",
@@ -88,11 +87,11 @@ proc = subprocess.Popen(
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT,
-    universal_newlines=True,        # <-- Python 3.6 compatible
+    universal_newlines=True,       
     bufsize=1
 )
 
-# Send sudo password once
+
 proc.stdin.write(sudo_password + "\n")
 proc.stdin.flush()
 
@@ -113,7 +112,7 @@ try:
             x = float(pose_match.group(1))
             y = float(pose_match.group(2))
             ts = time.time()
-            quality = quality_match.group(1) if quality_match else "20"
+            quality = quality_match.group(1) if quality_match else "10"
 
             packet = f"{ts:.3f},{x:.3f},{y:.3f},{quality}"
             sock.sendto(packet.encode(), (PC_IP, UDP_PORT))
@@ -126,3 +125,4 @@ finally:
     proc.terminate()
     sock.close()
     print("Program closed cleanly.")
+
