@@ -78,7 +78,7 @@ proc = subprocess.Popen(
     stdin=subprocess.PIPE,     
     stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT,
-    universal_newlines=True,           # <-- also Python 3.6 compatible
+    universal_newlines=True,           
     bufsize=1
 )
 
@@ -110,5 +110,6 @@ except KeyboardInterrupt:
 finally:
     proc.terminate()
     sock.close()
+
 
 
