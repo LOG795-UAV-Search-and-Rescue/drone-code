@@ -9,44 +9,47 @@ import termios
 import tty
 import getpass
 
-# === CONFIG ===
-PC_IP = "192.168.8.2"          
-UDP_PORT = 5005                 
+
+running = True
+
+
+PC_IP = "192.168.8.2"
+UDP_PORT = 5005
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 print("This script requires sudo privileges.")
 sudo_password = getpass.getpass("Enter sudo password: ")
 
-# === FIX CUZ PYTHON 3.6
+# === Test sudo password (Python 3.6 FIX) ===
 test = subprocess.run(
     ["sudo", "-S", "echo", "OK"],
     input=sudo_password + "\n",
-    universal_newlines=True,         
+    universal_newlines=True,          
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE
 )
 
 if "OK" not in test.stdout:
-    print(" Wrong sudo password. Exiting.")
+    print("Wrong sudo password. Exiting.")
     sys.exit(1)
 
 print("Sudo authentication successful.\n")
 
-
+# Command: read qvio values (non-interactive sudo)
 CMD = ["sudo", "-S", "voxl-inspect-qvio"]
 
 pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
 quality_regex = re.compile(r"\|\s*\d+\s*\|\s*(\d+)%")
 
 print(f"[VOXL] Streaming VIO data to {PC_IP}:{UDP_PORT}")
-print("")
 print("Controls:")
 print("  F = Continuous Follow mode")
 print("  C = Come-To-Me mode (rover waits)")
 print("  SPACE/ENTER = Rover Come-To-Me NOW")
-print("  Ctrl+C = Stop\n")
+print("  Q = Quit program")
+print("  Ctrl+C = Emergency stop\n")
 
-# === Key listener utilities ===
+# === Key reader ===
 def getch():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
@@ -58,8 +61,15 @@ def getch():
 
 # === Key listener thread ===
 def key_listener():
-    while True:
+    global running
+    while running:
         key = getch().lower()
+
+        if key == 'q':
+            print("[KEYBOARD] Quit requested.")
+            running = False
+            break
+
         if key == 'f':
             sock.sendto(b"MODE_CONTINUOUS", (PC_IP, UDP_PORT))
             print("[KEYBOARD] ➜ Sent MODE_CONTINUOUS")
@@ -72,22 +82,26 @@ def key_listener():
 
 threading.Thread(target=key_listener, daemon=True).start()
 
-# === Stream VIO ===
+# === Start QVIO subprocess ===
 proc = subprocess.Popen(
     CMD,
-    stdin=subprocess.PIPE,     
+    stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT,
-    universal_newlines=True,           
+    universal_newlines=True,        # <-- Python 3.6 compatible
     bufsize=1
 )
 
-# Send sudo password ONCE to the subprocess
+# Send sudo password once
 proc.stdin.write(sudo_password + "\n")
 proc.stdin.flush()
 
+# === Main loop ===
 try:
     for line in proc.stdout:
+        if not running:
+            break
+
         if not line:
             continue
 
@@ -105,11 +119,10 @@ try:
             sock.sendto(packet.encode(), (PC_IP, UDP_PORT))
 
 except KeyboardInterrupt:
-    print("\n[VOXL] Streaming stopped.")
+    print("\nEmergency stop (Ctrl+C).")
 
 finally:
+    running = False
     proc.terminate()
     sock.close()
-
-
-
+    print("Program closed cleanly.")
