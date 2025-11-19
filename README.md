@@ -25,7 +25,7 @@ VOXL Cameras → QVIO → UDP → Laptop → Rover Commands
 | Component | Version |
 |---|---|
 VOXL / VOXL2 | QVIO enabled |
-Python | 3.10+ |
+Python | 3.6 |
 Packages | matplotlib, socket, json, math |
 
 ---
