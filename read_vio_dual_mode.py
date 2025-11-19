@@ -72,13 +72,13 @@ def key_listener():
 
         if key == 'f':
             sock.sendto(b"MODE_CONTINUOUS", (PC_IP, UDP_PORT))
-            print("[KEYBOARD] ➜ Sent MODE_CONTINUOUS")
+            print("[KEYBOARD] Sent MODE_CONTINUOUS")
         elif key == 'c':
             sock.sendto(b"MODE_COME_TO_ME", (PC_IP, UDP_PORT))
-            print("[KEYBOARD] ➜ Sent MODE_COME_TO_ME")
+            print("[KEYBOARD] Sent MODE_COME_TO_ME")
         elif key == ' ' or key == '\n':
             sock.sendto(b"CMD_COME_TO_ME", (PC_IP, UDP_PORT))
-            print("[KEYBOARD] ➜ Sent CMD_COME_TO_ME")
+            print("[KEYBOARD] Sent CMD_COME_TO_ME")
 
 threading.Thread(target=key_listener, daemon=True).start()
 
@@ -113,7 +113,7 @@ try:
             x = float(pose_match.group(1))
             y = float(pose_match.group(2))
             ts = time.time()
-            quality = quality_match.group(1) if quality_match else "-"
+            quality = quality_match.group(1) if quality_match else "20"
 
             packet = f"{ts:.3f},{x:.3f},{y:.3f},{quality}"
             sock.sendto(packet.encode(), (PC_IP, UDP_PORT))
