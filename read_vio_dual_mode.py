@@ -112,7 +112,7 @@ try:
             x = float(pose_match.group(1))
             y = float(pose_match.group(2))
             ts = time.time()
-            quality = quality_match.group(1) if quality_match else "10"
+            quality = quality_match.group(1) if quality_match else 10
 
             packet = f"{ts:.3f},{x:.3f},{y:.3f},{quality}"
             sock.sendto(packet.encode(), (PC_IP, UDP_PORT))
@@ -125,4 +125,5 @@ finally:
     proc.terminate()
     sock.close()
     print("Program closed cleanly.")
+
 
