@@ -21,7 +21,7 @@ sudo_password = getpass.getpass("Enter sudo password: ")
 test = subprocess.run(
     ["sudo", "-S", "echo", "OK"],
     input=sudo_password + "\n",
-    universal_newlines=True,          # <-- FIXED
+    universal_newlines=True,         
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE
 )
@@ -32,7 +32,7 @@ if "OK" not in test.stdout:
 
 print("Sudo authentication successful.\n")
 
-# Command (non-interactive sudo)
+
 CMD = ["sudo", "-S", "voxl-inspect-qvio"]
 
 pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
@@ -110,4 +110,5 @@ except KeyboardInterrupt:
 finally:
     proc.terminate()
     sock.close()
+
 
