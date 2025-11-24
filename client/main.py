@@ -264,6 +264,24 @@ def vio_streamer():
         print("[VIO ERROR]", e)
     finally:
         proc.terminate()
+def rover_udp_listener():
+    """
+    Listen on UDP 5006 for rover pose packets and forward them to WebSocket clients.
+    Packets are expected in this format:
+        ROVER,x,y,o
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", 5006))
+    print("[ROVER UDP] Listening on 0.0.0.0:5006")
+
+    while True:
+        try:
+            data, addr = sock.recvfrom(1024)
+            msg = data.decode("utf-8", errors="ignore").strip()
+            # Example: "ROVER,-0.005,0.000,-3.071"
+            ws_broadcast(msg)
+        except Exception as e:
+            print("[ROVER UDP ERROR]", e)
 
 def main():
     host, port = UI_LISTEN_ADDR.split(":")
@@ -278,6 +296,12 @@ def main():
         print("Stopped.")
 
 if __name__ == "__main__":
+    # WebSocket server for the browser
     threading.Thread(target=start_ws_server, daemon=True).start()
+    # Drone VIO streamer (voxl-inspect-qvio)
     threading.Thread(target=vio_streamer, daemon=True).start()
+    # NEW: Rover pose listener (UDP 5006 → WebSocket)
+    threading.Thread(target=rover_udp_listener, daemon=True).start()
+
+    # HTTP UI server
     main()

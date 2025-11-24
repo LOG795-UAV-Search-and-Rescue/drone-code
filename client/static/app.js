@@ -125,9 +125,9 @@ function scheduleReconnect() {
 let mapCanvas, ctx;
 
 let droneX = 0, droneY = 0;
-let roverX = 0, roverY = 0, roverO = 0;
+let roverX = 0, roverY = 0, roverO = 0;   // new
 
-const pixelsPerMeter = 20;
+const pixelsPerMeter = 150;
 
 // --- Convert world coords to canvas ---
 function worldToScreen(x, y) {
@@ -272,6 +272,12 @@ window.addEventListener("DOMContentLoaded", () => {
         log(`CLICK → GOTO ${x}, ${y}`);
         sendCmd(`GOTO ${x} ${y}`);
     });
-
+    
+    setInterval(() => {
+    log(
+        `[INFO] DRONE  → x=${droneX.toFixed(2)}, y=${droneY.toFixed(2)}\n` +
+        `[INFO] ROVER  → x=${roverX.toFixed(2)}, y=${roverY.toFixed(2)}, o=${roverO.toFixed(2)}`
+        );
+    }, 5000);
     drawMap();
 });
