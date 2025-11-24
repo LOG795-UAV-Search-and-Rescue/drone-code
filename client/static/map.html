@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drone Map Control</title>
+    <style>
+        body {
+            background: #0b0f14;
+            color: #e7eef7;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        #map {
+            background: #111;
+            border: 1px solid #555;
+            display: block;
+            margin-bottom: 15px;
+        }
+        .btn {
+            padding: 10px 14px;
+            margin-right: 6px;
+            background: #1a2230;
+            border: 1px solid #273244;
+            color: white;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        .btn:hover {
+            background: #4aa3ff;
+        }
+        #log {
+            background: #0f141c;
+            border: 1px solid #273244;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            white-space: pre-line;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Drone Map + Rover Control</h1>
+
+<canvas id="map" width="600" height="600"></canvas>
+
+<!-- Rover Command Buttons -->
+<div>
+    <button class="btn" onclick="sendCmd('MODE_CONTINUOUS')">Continuous Follow</button>
+    <button class="btn" onclick="sendCmd('MODE_COME_TO_ME')">Come To Me Mode</button>
+    <button class="btn" onclick="sendCmd('CMD_COME_TO_ME')">Come To Me NOW</button>
+</div>
+
+<!-- Log Panel -->
+<h3>Log</h3>
+<div id="log"></div>
+
+<script>
+// === WebSocket for drone VIO ===
+var ws = new WebSocket("ws://" + location.hostname + ":8765");
+
+ws.onmessage = function (evt) {
+    var d = evt.data.split(",");
+    var ts = d[0];
+    var x = parseFloat(d[1]);
+    var y = parseFloat(d[2]);
+    var q = d[3];
+
+    drawPoint(x, y);
+    appendLog("VIO → x=" + x.toFixed(2) + ", y=" + y.toFixed(2) + ", q=" + q);
+};
+
+// === MAP DRAWING ===
+var ctx = document.getElementById("map").getContext("2d");
+
+// Keep full trail
+var trail = [];
+
+function drawPoint(x, y) {
+    // Clear screen
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, 600, 600);
+
+    // Draw single live position
+    ctx.fillStyle = "yellow";
+    ctx.beginPath();
+    ctx.arc(300 + x * 20, 300 - y * 20, 6, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+
+// === Logging ===
+function appendLog(txt) {
+    var log = document.getElementById("log");
+    log.textContent += txt + "\n";
+    log.scrollTop = log.scrollHeight;
+}
+
+// === Rover Command Sender ===
+function sendCmd(cmd) {
+    appendLog("SEND CMD → " + cmd);
+
+    fetch("/api/rover-command", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({cmd: cmd})
+    })
+    .then(r => r.text())
+    .then(t => appendLog("ROVER RESPONSE: " + t))
+    .catch(e => appendLog("ERROR sending rover cmd: " + e));
+}
+</script>
+
+</body>
+</html>
