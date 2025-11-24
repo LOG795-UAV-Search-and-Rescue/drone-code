@@ -4,7 +4,6 @@ import http.client
 import urllib.parse
 import asyncio
 import threading
-import websockets
 import subprocess
 import re
 import time
@@ -15,8 +14,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from pathlib import Path
 
-
-
 WS_CLIENTS = []
 
 def ws_accept_client(conn):
@@ -25,25 +22,20 @@ def ws_accept_client(conn):
         if "Sec-WebSocket-Key" not in data:
             conn.close()
             return
-
         key = None
         for line in data.split("\r\n"):
             if "Sec-WebSocket-Key" in line:
                 key = line.split(":")[1].strip()
-
         magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         accept = base64.b64encode(hashlib.sha1((key + magic).encode()).digest())
-
         resp = (
             "HTTP/1.1 101 Switching Protocols\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
             "Sec-WebSocket-Accept: " + accept.decode() + "\r\n\r\n"
         )
-
         conn.send(resp.encode())
         WS_CLIENTS.append(conn)
-
     except:
         conn.close()
 
@@ -63,18 +55,15 @@ def start_ws_server():
     s.bind(("0.0.0.0", 8765))
     s.listen(5)
     print("[WS] WebSocket running on ws://0.0.0.0:8765")
-
     while True:
         conn, addr = s.accept()
         threading.Thread(target=ws_accept_client, args=(conn,), daemon=True).start()
-
 
 UI_LISTEN_ADDR = "0.0.0.0:8080"
 MEDIAMTX_ORIGIN = "http://127.0.0.1:8889"
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-# === VIO CONFIGS RIGHT HERE BOI ===
 VIO_CMD = ["sudo", "voxl-inspect-qvio"]
 
 pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
@@ -114,20 +103,17 @@ class Handler(BaseHTTPRequestHandler):
             cmd = payload.get("cmd", "")
         except:
             cmd = ""
-
-        # Send rover commands via UDP
-        UDP_IP = "192.168.8.13"    # Your PC / Rover receiver
+        UDP_IP = "192.168.8.10"
         UDP_PORT = 5005
-
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(cmd.encode(), (UDP_IP, UDP_PORT))
-
         resp = "OK sent: " + cmd
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(resp)))
         self.end_headers()
         self.wfile.write(resp.encode())
+
     def do_OPTIONS(self):
         if self.is_whep_path():
             self.send_response(204)
@@ -184,7 +170,6 @@ class Handler(BaseHTTPRequestHandler):
         if not fpath.is_file():
             self.send_error(404)
             return
-
         if fpath.suffix == ".html":
             ctype = "text/html; charset=utf-8"
         elif fpath.suffix == ".css":
@@ -193,10 +178,8 @@ class Handler(BaseHTTPRequestHandler):
             ctype = "application/javascript; charset=utf-8"
         else:
             ctype = "application/octet-stream"
-
         with open(fpath, "rb") as f:
             data = f.read()
-
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -209,20 +192,16 @@ class Handler(BaseHTTPRequestHandler):
             path=incoming.path,
             query=incoming.query or ""
         ).geturl()
-
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length) if length > 0 else None
-
         conn = None
         try:
             if ORIGIN_SCHEME == "https":
                 conn = http.client.HTTPSConnection(ORIGIN_HOST, ORIGIN_PORT, timeout=20)
             else:
                 conn = http.client.HTTPConnection(ORIGIN_HOST, ORIGIN_PORT, timeout=20)
-
             conn.request(self.command, target_url, body=body, headers=filter_headers(self.headers))
             resp = conn.getresponse()
-
             self.send_response(resp.status, resp.reason)
             for k, v in resp.getheaders():
                 if k.lower() in HOP_BY_HOP:
@@ -230,7 +209,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header(k, v)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-
             while True:
                 chunk = resp.read(65536)
                 if not chunk:
@@ -242,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
             if conn is not None:
                 try:
                     conn.close()
-                except Exception:
+                except:
                     pass
 
     def handle_example_call(self):
@@ -250,58 +228,46 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length > 0 else b""
         try:
             payload = json.loads(body.decode("utf-8")) if body else {}
-        except Exception:
+        except:
             payload = {}
-
-        resp = {
-            "ok": True,
-            "message": "Python server received your request",
-            "received": payload,
-        }
-        data = json.dumps(resp).encode("utf-8")
-
+        resp = json.dumps({"ok": True, "message": "Python server received your request", "received": payload})
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(len(resp)))
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(resp.encode())
 
 def vio_streamer():
     proc = subprocess.Popen(
         VIO_CMD, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         universal_newlines=True, bufsize=1
     )
-
     print("[VIO] Streaming...")
-
     try:
-        for line in proc.stdout:
+        while True:
+            line = proc.stdout.readline()
+            if not line:
+                break
             line = line.strip()
             pose_match = pose_regex.search(line)
             quality_match = quality_regex.search(line)
-
             if pose_match:
                 x = float(pose_match.group(1))
                 y = float(pose_match.group(2))
                 ts = time.time()
                 quality = quality_match.group(1) if quality_match else "-"
-
                 packet = "%0.3f,%0.3f,%0.3f,%s" % (ts, x, y, quality)
-
                 ws_broadcast(packet)
-
+                udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                udp_sock.sendto(packet.encode(), ("192.168.8.10", 5005))
     except Exception as e:
         print("[VIO ERROR]", e)
     finally:
         proc.terminate()
 
-
-
 def main():
-    address = UI_LISTEN_ADDR.split(":")
-    host = address[0]
-    port = int(address[1])
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    host, port = UI_LISTEN_ADDR.split(":")
+    httpd = ThreadingHTTPServer((host, int(port)), Handler)
     print("UI listening on %s" % UI_LISTEN_ADDR)
     try:
         httpd.serve_forever()
@@ -311,10 +277,7 @@ def main():
         httpd.server_close()
         print("Stopped.")
 
-
 if __name__ == "__main__":
     threading.Thread(target=start_ws_server, daemon=True).start()
     threading.Thread(target=vio_streamer, daemon=True).start()
-    main()   # HTTP UI server
-
-
+    main()
