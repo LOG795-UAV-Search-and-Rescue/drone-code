@@ -99,4 +99,9 @@ The UI uses `/drone/whep` which the Python server will proxy to MediaMTX running
 http://127.0.0.1:8889/whep
 ```
 
+### IF ISSUES WITH CAMERA
+
+sudo systemctl restart mediamtx
+
+
 > Made with care by [Adam Mihajlovic](https://github.com/Funnyadd), [Maxence Lord](https://github.com/ImprovUser) and [Raphaël Camara](https://github.com/RaphaelCamara) ❤️
