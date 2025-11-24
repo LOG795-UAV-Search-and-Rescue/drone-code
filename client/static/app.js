@@ -120,34 +120,82 @@ function scheduleReconnect() {
 }
 
 // =====================================================
-// MAP + ROVER CLICK-GOTO
+// MAP + ROVER + DRONE
 // =====================================================
 let mapCanvas, ctx;
+
 let droneX = 0, droneY = 0;
+let roverX = 0, roverY = 0, roverO = 0;
+
 const pixelsPerMeter = 20;
 
-function updateMap(packet) {
-    const parts = packet.split(",");
-    if (parts.length < 4) return;
+// --- Convert world coords to canvas ---
+function worldToScreen(x, y) {
+    return {
+        x: mapCanvas.width / 2 + x * pixelsPerMeter,
+        y: mapCanvas.height / 2 - y * pixelsPerMeter
+    };
+}
 
-    droneX = parseFloat(parts[1]);
-    droneY = parseFloat(parts[2]);
-    drawMap();
+// --- Rover triangle drawing ---
+function drawRoverTriangle(x, y, heading) {
+    const pos = worldToScreen(x, y);
+    const size = 15;
+
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.rotate(-heading);
+
+    ctx.beginPath();
+    ctx.moveTo(0, -size);
+    ctx.lineTo(size / 2, size);
+    ctx.lineTo(-size / 2, size);
+    ctx.closePath();
+
+    ctx.fillStyle = "red";
+    ctx.fill();
+
+    ctx.restore();
 }
 
 function drawMap() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
 
-    const sx = mapCanvas.width / 2 + droneX * pixelsPerMeter;
-    const sy = mapCanvas.height / 2 - droneY * pixelsPerMeter;
-
+    // ---- Drone ----
+    const d = worldToScreen(droneX, droneY);
     ctx.fillStyle = "cyan";
     ctx.beginPath();
-    ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+    ctx.arc(d.x, d.y, 6, 0, Math.PI * 2);
     ctx.fill();
+
+    // ---- Rover ----
+    drawRoverTriangle(roverX, roverY, roverO);
 }
 
+// =====================================================
+// HANDLE INCOMING PACKETS
+// =====================================================
+function handlePacket(msg) {
+    if (msg.startsWith("ROVER")) {
+        const p = msg.split(",");
+        roverX = parseFloat(p[1]);
+        roverY = parseFloat(p[2]);
+        roverO = parseFloat(p[3]);
+        drawMap();
+        return;
+    }
+
+    // Drone VIO
+    const parts = msg.split(",");
+    if (parts.length >= 3) {
+        droneX = parseFloat(parts[1]);
+        droneY = parseFloat(parts[2]);
+        drawMap();
+    }
+}
+
+// Convert screen click → world coords
 function screenToWorld(px, py) {
     return {
         x: (px - mapCanvas.width / 2) / pixelsPerMeter,
@@ -203,14 +251,15 @@ window.addEventListener("DOMContentLoaded", () => {
     mapCanvas = $("mapCanvas");
     ctx = mapCanvas.getContext("2d");
 
-    // WebSocket for VIO
+    // WebSocket for Drone + Rover data
     let ws = new WebSocket("ws://" + window.location.hostname + ":8765");
+
     ws.onmessage = (ev) => {
-        log("[VIO] " + ev.data);
-        updateMap(ev.data);
+        log("[WS] " + ev.data);
+        handlePacket(ev.data);
     };
 
-    // Left click → GOTO command
+    // Left click → GOTO
     mapCanvas.addEventListener("click", (e) => {
         const rect = mapCanvas.getBoundingClientRect();
         const px = e.clientX - rect.left;
@@ -221,7 +270,6 @@ window.addEventListener("DOMContentLoaded", () => {
         const y = w.y.toFixed(2);
 
         log(`CLICK → GOTO ${x}, ${y}`);
-
         sendCmd(`GOTO ${x} ${y}`);
     });
 
