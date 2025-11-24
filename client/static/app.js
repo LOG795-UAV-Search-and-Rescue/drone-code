@@ -145,3 +145,92 @@ window.addEventListener("DOMContentLoaded", () => {
         scheduleReconnect();
     });
 });
+
+// =====================================================
+// MAP + WEBSOCKET + RIGHT-CLICK ROVER COMMANDS
+// =====================================================
+
+// Connect to the drone WebSocket for VIO packets
+let vioSocket = new WebSocket("ws://" + window.location.hostname + ":8765");
+
+vioSocket.onmessage = (ev) => {
+    let msg = ev.data.trim();
+    log("[VIO] " + msg);
+    updateMapPosition(msg);
+};
+
+// --- MAP SETUP ---
+const canvas = document.getElementById("mapCanvas");
+const ctx = canvas.getContext("2d");
+
+
+const pixelsPerMeter = 50; //MAP BIG OR SMALL HERE
+
+
+let droneX = 0;
+let droneY = 0;
+
+function updateMapPosition(packet) {
+    let parts = packet.split(",");
+    if (parts.length < 4) return;
+
+    let x = parseFloat(parts[1]);
+    let y = parseFloat(parts[2]);
+    droneX = x;
+    droneY = y;
+    drawMap();
+}
+
+function worldToScreen(x, y) {
+    let cx = canvas.width / 2;
+    let cy = canvas.height / 2;
+    return {
+        x: cx + x * pixelsPerMeter,
+        y: cy - y * pixelsPerMeter
+    };
+}
+
+function screenToWorld(px, py) {
+    let cx = canvas.width / 2;
+    let cy = canvas.height / 2;
+    return {
+        x: (px - cx) / pixelsPerMeter,
+        y: (cy - py) / pixelsPerMeter
+    };
+}
+
+function drawMap() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    let pos = worldToScreen(droneX, droneY);
+    ctx.fillStyle = "cyan";
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// --- RIGHT CLICK HANDLER ---
+canvas.addEventListener("click", function (e) {
+
+    let rect = canvas.getBoundingClientRect();
+    let px = e.clientX - rect.left;
+    let py = e.clientY - rect.top;
+
+    let world = screenToWorld(px, py);
+    let x = world.x.toFixed(2);
+    let y = world.y.toFixed(2);
+
+    log(`CLICK → GOTO ${x}, ${y}`);
+
+    fetch("/api/rover-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cmd: `GOTO ${x} ${y}` })
+    })
+    .then(r => r.text())
+    .then(t => log("[ROVER] " + t))
+    .catch(err => log("[ROVER ERROR] " + err));
+});
+
+
