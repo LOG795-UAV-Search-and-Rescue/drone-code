@@ -1,33 +1,76 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <title>Drone UI</title>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
-    <body>
-        <header>
-            <h1>Drone Interface</h1>
-        </header>
+<head>
+    <title>Drone + Rover Control UI</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="/static/style.css">
 
-        <main>
-            <section class="video-card">
-                <video id="video" autoplay playsinline muted></video>
-                <div class="controls">
-                    <button id="connectBtn">Connect</button>
-                    <button id="disconnectBtn" disabled>Disconnect</button>
-                    <span id="status" class="status">idle</span>
-                </div>
-            </section>
-            <section class="actions">
-                <button id="callUgvBtn" class="primary">Call UGV robot</button>
-                <pre id="log" class="log"></pre>
-            </section>
-        </main>
+    <style>
+        /* Map styles */
+        #mapCanvas {
+            background: #111;
+            border: 1px solid #555;
+            display: block;
+            margin: 20px 0;
+        }
+        .map-controls button {
+            padding: 10px 14px;
+            margin-right: 6px;
+            background: #1a2230;
+            border: 1px solid #273244;
+            color: white;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        .map-controls button:hover {
+            background: #4aa3ff;
+        }
+    </style>
+</head>
 
-        <footer><small>Lightweight UI to control the robot made by the best <strong>PFE</strong> team!</small></footer>
+<body>
+<header>
+    <h1>Drone Interface + Rover Controller</h1>
+</header>
 
-        <script src="/static/app.js"></script>
-    </body>
+<main>
+
+    <!-- VIDEO FEED -->
+    <section class="video-card">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="controls">
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+            <span id="status" class="status">idle</span>
+        </div>
+    </section>
+
+    <!-- MAP + ROVER -->
+    <section>
+        <h2>Rover Map</h2>
+        <canvas id="mapCanvas" width="600" height="600"></canvas>
+
+        <div class="map-controls">
+            <button onclick="sendCmd('MODE_CONTINUOUS')">Continuous Follow</button>
+            <button onclick="sendCmd('MODE_COME_TO_ME')">Come To Me Mode</button>
+            <button onclick="sendCmd('CMD_COME_TO_ME')">Come To Me NOW</button>
+        </div>
+    </section>
+
+    <!-- LOG -->
+    <section class="actions">
+    <button id="callUgvBtn" class="primary">Call UGV Robot</button>
+    <pre id="log" class="log"></pre>
+    </section>
+
+</main>
+
+<footer>
+    <small>Drone + Rover UI by the best PFE team.</small>
+</footer>
+
+<script src="/static/app.js"></script>
+
+</body>
 </html>
