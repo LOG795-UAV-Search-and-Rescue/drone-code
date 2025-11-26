@@ -17,6 +17,9 @@ from pathlib import Path
 WS_CLIENTS = []
 
 INITIAL_YAW = None
+INITIAL_X = None
+INITIAL_Y = None
+
 def normalize_angle(a):
     while a > 180: a -= 360
     while a < -180: a += 360
@@ -258,9 +261,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(resp.encode())
     
     def handle_recalibrate_yaw(self):
-        global INITIAL_YAW
+        global INITIAL_YAW, INITIAL_X, INITIAL_Y
         INITIAL_YAW = None  # reset and next VIO reading will set new zero
-
+        INITIAL_X = None
+        INITIAL_Y = None
         resp = json.dumps({"ok": True, "message": "Yaw recalibrated"})
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -271,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def vio_streamer():
-    global INITIAL_YAW
+    global INITIAL_YAW, INITIAL_X, INITIAL_Y
 
     proc = subprocess.Popen(
         VIO_CMD, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -304,22 +308,32 @@ def vio_streamer():
                     INITIAL_YAW = yaw_raw
                 else:
                     continue                # skip this frame until yaw is valid
-
+            
             # Compute calibrated yaw
             yaw = normalize_angle(yaw_raw - INITIAL_YAW)
 
-            if pose_match:
-                x = float(pose_match.group(1))
-                y = float(pose_match.group(2))
-                ts = time.time()
-                quality = quality_match.group(1) if quality_match else "-"
+            # Initialize position reference
+            raw_x = float(pose_match.group(1))
+            raw_y = float(pose_match.group(2))
 
-                packet = "%0.3f,%0.3f,%0.3f,%0.1f,%s" % (ts, x, y, yaw, quality)
+            if INITIAL_X is None:
+                INITIAL_X = raw_x
+            if INITIAL_Y is None:
+                INITIAL_Y = raw_y
 
-                ws_broadcast(packet)
+            # Apply calibration
+            x = raw_x - INITIAL_X
+            y = raw_y - INITIAL_Y
 
-                udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                udp_sock.sendto(packet.encode(), ("192.168.8.2", 5005))
+            ts = time.time()
+            quality = quality_match.group(1) if quality_match else "-"
+
+            packet = "%0.3f,%0.3f,%0.3f,%0.1f,%s" % (ts, x, y, yaw, quality)
+
+            ws_broadcast(packet)
+
+            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_sock.sendto(packet.encode(), ("192.168.8.2", 5005))
 
     except Exception as e:
         print("[VIO ERROR]", e)

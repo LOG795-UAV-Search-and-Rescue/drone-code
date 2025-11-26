@@ -181,7 +181,7 @@ function drawDroneTriangle(x, y, yawDeg) {
     ctx.translate(pos.x, pos.y);
 
     // Convert yaw (deg) → radians
-    const rad = -yawDeg * Math.PI / 180;
+    const rad = yawDeg * Math.PI / 180;
     ctx.rotate(rad);
 
     ctx.beginPath();
@@ -230,7 +230,7 @@ function handlePacket(msg) {
     // Drone VIO
     const parts = msg.split(",");
     if (parts.length >= 3) {
-        droneX = parseFloat(parts[1]);
+        droneX = -parseFloat(parts[1]);
         droneY = parseFloat(parts[2]);
         droneYaw = parseFloat(parts[3]); 
         drawMap();
