@@ -19,6 +19,8 @@ let videoEl = null;
 let reconnectTimer = null;
 let closing = false;
 
+
+
 const RETRY_BASE_MS = 500;
 const RETRY_MAX_MS = 5000;
 
@@ -124,8 +126,9 @@ function scheduleReconnect() {
 // =====================================================
 let mapCanvas, ctx;
 
-let droneX = 0, droneY = 0;
+let droneX = 0, droneY = 0, droneYaw = 0;;
 let roverX = 0, roverY = 0, roverO = 0;   // new
+
 
 const pixelsPerMeter = 150;
 
@@ -158,19 +161,45 @@ function drawRoverTriangle(x, y, heading) {
     ctx.restore();
 }
 
+function drawDroneTriangle(x, y, yawDeg) {
+    const pos = worldToScreen(x, y);
+    const size = 15;
+
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+
+    // Convert yaw (deg) → radians
+    const rad = -yawDeg * Math.PI / 180;
+    ctx.rotate(rad);
+
+    ctx.beginPath();
+    ctx.moveTo(0, -size);       // front
+    ctx.lineTo(size / 2, size); // rear right
+    ctx.lineTo(-size / 2, size);// rear left
+    ctx.closePath();
+
+    ctx.fillStyle = "cyan";
+    ctx.fill();
+
+    ctx.restore();
+}
+
 function drawMap() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
 
     // ---- Drone ----
+    /*
     const d = worldToScreen(droneX, droneY);
     ctx.fillStyle = "cyan";
     ctx.beginPath();
     ctx.arc(d.x, d.y, 6, 0, Math.PI * 2);
     ctx.fill();
-
+    */
+   drawDroneTriangle(droneX, droneY, droneYaw);
     // ---- Rover ----
     drawRoverTriangle(roverX, roverY, roverO);
+    
 }
 
 // =====================================================
@@ -191,6 +220,7 @@ function handlePacket(msg) {
     if (parts.length >= 3) {
         droneX = parseFloat(parts[1]);
         droneY = parseFloat(parts[2]);
+        droneYaw = parseFloat(parts[3]); 
         drawMap();
     }
 }

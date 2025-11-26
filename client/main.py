@@ -68,6 +68,11 @@ VIO_CMD = ["sudo", "voxl-inspect-qvio"]
 
 pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
 quality_regex = re.compile(r"\|\s*\d+\s*\|\s*(\d+)%")
+rpy_regex = re.compile(
+    r"Yaw \(deg\)\|\s*([-0-9.]+)\s+([-0-9.]+)\s+([-0-9.]+)"
+)
+
+
 
 HOP_BY_HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -103,7 +108,7 @@ class Handler(BaseHTTPRequestHandler):
             cmd = payload.get("cmd", "")
         except:
             cmd = ""
-        UDP_IP = "192.168.8.10"
+        UDP_IP = "192.168.8.2"
         UDP_PORT = 5005
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(cmd.encode(), (UDP_IP, UDP_PORT))
@@ -251,15 +256,23 @@ def vio_streamer():
             line = line.strip()
             pose_match = pose_regex.search(line)
             quality_match = quality_regex.search(line)
+            match_rpy = rpy_regex.search(line)
+            if match_rpy:
+                roll = float(match_rpy.group(1))
+                pitch = float(match_rpy.group(2))
+                yaw = float(match_rpy.group(3))
+            else:
+                yaw = 0.0
+
             if pose_match:
                 x = float(pose_match.group(1))
                 y = float(pose_match.group(2))
                 ts = time.time()
                 quality = quality_match.group(1) if quality_match else "-"
-                packet = "%0.3f,%0.3f,%0.3f,%s" % (ts, x, y, quality)
+                packet = "%0.3f,%0.3f,%0.3f,%0.1f,%s" % (ts, x, y, yaw, quality)
                 ws_broadcast(packet)
                 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                udp_sock.sendto(packet.encode(), ("192.168.8.10", 5005))
+                udp_sock.sendto(packet.encode(), ("192.168.8.2", 5005))
     except Exception as e:
         print("[VIO ERROR]", e)
     finally:
