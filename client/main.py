@@ -16,6 +16,12 @@ from pathlib import Path
 
 WS_CLIENTS = []
 
+INITIAL_YAW = None
+def normalize_angle(a):
+    while a > 180: a -= 360
+    while a < -180: a += 360
+    return a
+
 def ws_accept_client(conn):
     try:
         data = conn.recv(1024).decode()
@@ -69,8 +75,9 @@ VIO_CMD = ["sudo", "voxl-inspect-qvio"]
 pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
 quality_regex = re.compile(r"\|\s*\d+\s*\|\s*(\d+)%")
 rpy_regex = re.compile(
-    r"Yaw \(deg\)\|\s*([-0-9.]+)\s+([-0-9.]+)\s+([-0-9.]+)"
+    r"\|\s*[-0-9.]+\s+[-0-9.]+\s+[-0-9.]+\|\s*([-0-9.]+)\s+([-0-9.]+)\s+([-0-9.]+)\|"
 )
+
 
 
 
@@ -148,13 +155,21 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/rover-command":
             self.handle_rover_command()
             return
+
+        if self.path == "/api/recalibrate-yaw":
+            self.handle_recalibrate_yaw()
+            return
+
         if self.is_whep_path():
             self.proxy_whep()
             return
+
         if self.path == "/api/call-ugv":
             self.handle_example_call()
             return
+
         self.send_error(404)
+
 
     def do_PATCH(self):
         if self.is_whep_path():
@@ -241,42 +256,83 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(resp)))
         self.end_headers()
         self.wfile.write(resp.encode())
+    
+    def handle_recalibrate_yaw(self):
+        global INITIAL_YAW
+        INITIAL_YAW = None  # reset and next VIO reading will set new zero
+
+        resp = json.dumps({"ok": True, "message": "Yaw recalibrated"})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp.encode())
+
+
 
 def vio_streamer():
+    global INITIAL_YAW
+
     proc = subprocess.Popen(
         VIO_CMD, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         universal_newlines=True, bufsize=1
     )
     print("[VIO] Streaming...")
+
     try:
         while True:
             line = proc.stdout.readline()
             if not line:
                 break
             line = line.strip()
+
             pose_match = pose_regex.search(line)
             quality_match = quality_regex.search(line)
-            match_rpy = rpy_regex.search(line)
-            if match_rpy:
-                roll = float(match_rpy.group(1))
-                pitch = float(match_rpy.group(2))
-                yaw = float(match_rpy.group(3))
+            rpy_match = rpy_regex.search(line)
+
+            # Extract yaw_raw
+            if rpy_match:
+                roll = float(rpy_match.group(1))
+                pitch = float(rpy_match.group(2))
+                yaw_raw = float(rpy_match.group(3))
             else:
-                yaw = 0.0
+                yaw_raw = 0.0
+
+           # Initialize yaw reference safely
+            if INITIAL_YAW is None:
+                if abs(yaw_raw) > 0.1:      # ignore zero / noise until VIO stabilizes
+                    INITIAL_YAW = yaw_raw
+                else:
+                    continue                # skip this frame until yaw is valid
+
+            # Compute calibrated yaw
+            yaw = normalize_angle(yaw_raw - INITIAL_YAW)
 
             if pose_match:
                 x = float(pose_match.group(1))
                 y = float(pose_match.group(2))
                 ts = time.time()
                 quality = quality_match.group(1) if quality_match else "-"
+
                 packet = "%0.3f,%0.3f,%0.3f,%0.1f,%s" % (ts, x, y, yaw, quality)
+
                 ws_broadcast(packet)
+
                 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 udp_sock.sendto(packet.encode(), ("192.168.8.2", 5005))
+
     except Exception as e:
         print("[VIO ERROR]", e)
     finally:
-        proc.terminate()
+        try:
+            proc.terminate()
+        except PermissionError:
+            print("[VIO] Cannot terminate VIO subprocess (no permissions).")
+        except Exception as e:
+            print("[VIO] Terminate error:", e)
+
+
+
 def rover_udp_listener():
     """
     Listen on UDP 5006 for rover pose packets and forward them to WebSocket clients.

@@ -140,6 +140,18 @@ function worldToScreen(x, y) {
     };
 }
 
+function recalibrateYaw() {
+    log("Recalibrating yaw…");
+    fetch("/api/recalibrate-yaw", {
+        method: "POST"
+    })
+    .then(r => r.json())
+    .then(j => {
+        log("Yaw recalibrated: " + j.message);
+    })
+    .catch(err => log("Recalibrate error: " + err.message));
+}
+
 // --- Rover triangle drawing ---
 function drawRoverTriangle(x, y, heading) {
     const pos = worldToScreen(x, y);
@@ -257,7 +269,9 @@ window.addEventListener("DOMContentLoaded", () => {
             scheduleReconnect();
         });
     });
-
+    $("recalibrateBtn").addEventListener("click", () => {
+        recalibrateYaw();
+    });
     $("disconnectBtn").addEventListener("click", stopWHEP);
 
     $("callUgvBtn").addEventListener("click", async () => {
