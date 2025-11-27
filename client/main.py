@@ -2,7 +2,6 @@
 import json
 import http.client
 import urllib.parse
-import asyncio
 import threading
 import subprocess
 import re
@@ -13,35 +12,60 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from pathlib import Path
+import math
 
+# ============================================================
+# GLOBAL STATE
+# ============================================================
+latest_drone_local = (0.0, 0.0, 0.0)  # dx, dy, yaw (deg)
+latest_rover_x = 0.0
+latest_rover_y = 0.0
+latest_rover_o = 0.0
+
+# 3-point calibration storage
+A = None
+B = None
+C = None
+
+CALIBRATED = False
+
+# Final transform for UI only: world = R * local + T
+R = [[1,0],[0,1]]
+T = (0,0)
+
+# ============================================================
+# WEBSOCKET SERVER
+# ============================================================
 WS_CLIENTS = []
 
-INITIAL_YAW = None
-INITIAL_X = None
-INITIAL_Y = None
-
-def normalize_angle(a):
-    while a > 180: a -= 360
-    while a < -180: a += 360
-    return a
+def build_ws_frame(msg):
+    payload = msg.encode()
+    L = len(payload)
+    if L < 126:
+        header = bytes([0x81, L])
+    elif L < 65536:
+        header = bytes([0x81, 126]) + L.to_bytes(2, 'big')
+    else:
+        header = bytes([0x81, 127]) + L.to_bytes(8, 'big')
+    return header + payload
 
 def ws_accept_client(conn):
     try:
-        data = conn.recv(1024).decode()
-        if "Sec-WebSocket-Key" not in data:
-            conn.close()
-            return
-        key = None
-        for line in data.split("\r\n"):
+        hdr = conn.recv(2048).decode()
+        key = ""
+        for line in hdr.split("\r\n"):
             if "Sec-WebSocket-Key" in line:
                 key = line.split(":")[1].strip()
         magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-        accept = base64.b64encode(hashlib.sha1((key + magic).encode()).digest())
+        accept = base64.b64encode(
+            hashlib.sha1((key + magic).encode()).digest()
+        ).decode()
+
         resp = (
             "HTTP/1.1 101 Switching Protocols\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Accept: " + accept.decode() + "\r\n\r\n"
+            "Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
         )
         conn.send(resp.encode())
         WS_CLIENTS.append(conn)
@@ -49,7 +73,7 @@ def ws_accept_client(conn):
         conn.close()
 
 def ws_broadcast(msg):
-    frame = b"\x81" + chr(len(msg)).encode() + msg.encode()
+    frame = build_ws_frame(msg)
     dead = []
     for c in WS_CLIENTS:
         try:
@@ -63,328 +87,271 @@ def start_ws_server():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("0.0.0.0", 8765))
     s.listen(5)
-    print("[WS] WebSocket running on ws://0.0.0.0:8765")
+    print("[WS] Listening on ws://0.0.0.0:8765")
     while True:
-        conn, addr = s.accept()
+        conn, _ = s.accept()
         threading.Thread(target=ws_accept_client, args=(conn,), daemon=True).start()
 
-UI_LISTEN_ADDR = "0.0.0.0:8080"
-MEDIAMTX_ORIGIN = "http://127.0.0.1:8889"
+# ============================================================
+# HTTP SERVER (unchanged)
+# ============================================================
 
+UI_LISTEN_ADDR = "0.0.0.0:8080"
 STATIC_DIR = Path(__file__).parent / "static"
 
-VIO_CMD = ["sudo", "voxl-inspect-qvio"]
-
-pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
-quality_regex = re.compile(r"\|\s*\d+\s*\|\s*(\d+)%")
-rpy_regex = re.compile(
-    r"\|\s*[-0-9.]+\s+[-0-9.]+\s+[-0-9.]+\|\s*([-0-9.]+)\s+([-0-9.]+)\s+([-0-9.]+)\|"
-)
-
-
-
+MEDIAMTX_ORIGIN = "http://127.0.0.1:8889"
+ORIGIN = urllib.parse.urlsplit(MEDIAMTX_ORIGIN)
+ORIGIN_HOST = ORIGIN.hostname
+ORIGIN_PORT = ORIGIN.port or 80
 
 HOP_BY_HOP = {
-    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-    "te", "trailers", "transfer-encoding", "upgrade",
+    "connection","keep-alive","proxy-authenticate","proxy-authorization",
+    "te","trailers","transfer-encoding","upgrade"
 }
 
-ORIGIN = urllib.parse.urlsplit(MEDIAMTX_ORIGIN)
-if ORIGIN.hostname is None:
-    raise RuntimeError("MEDIAMTX_ORIGIN must include a hostname")
-
-ORIGIN_HOST = ORIGIN.hostname
-ORIGIN_SCHEME = ORIGIN.scheme
-ORIGIN_PORT = ORIGIN.port or (443 if ORIGIN_SCHEME == "https" else 80)
+def filter_headers(h):
+    return {k:v for k,v in h.items() if k.lower() not in HOP_BY_HOP and k.lower()!="host"}
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
-def filter_headers(headers):
-    out = {}
-    for k, v in headers.items():
-        lk = k.lower()
-        if lk in HOP_BY_HOP or lk == "host":
-            continue
-        out[k] = v
-    return out
-
 class Handler(BaseHTTPRequestHandler):
-    def handle_rover_command(self):
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        body = self.rfile.read(length) if length > 0 else b""
-        try:
-            payload = json.loads(body.decode("utf-8"))
-            cmd = payload.get("cmd", "")
-        except:
-            cmd = ""
-        UDP_IP = "192.168.8.2"
-        UDP_PORT = 5005
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(cmd.encode(), (UDP_IP, UDP_PORT))
-        resp = "OK sent: " + cmd
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
-        self.send_header("Content-Length", str(len(resp)))
-        self.end_headers()
-        self.wfile.write(resp.encode())
 
-    def do_OPTIONS(self):
-        if self.is_whep_path():
-            self.send_response(204)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type,If-None-Match,If-Match")
-            self.end_headers()
-            return
-        self.send_response(204)
-        self.end_headers()
+    # ---------------------- CALIBRATION ----------------------
+    def do_POST(self):
+        if self.path == "/api/calib/start": return self.calib_A()
+        if self.path == "/api/calib/right": return self.calib_B()
+        if self.path == "/api/calib/forward": return self.calib_C()
+        if self.path == "/api/calib/finish": return self.calib_finish()
+        if self.path == "/api/rover-command": return self.send_rover_cmd()
+        self.send_error(404)
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
-            self.serve_file("index.html")
-            return
+        if self.path in ("/","/index.html"):
+            return self.serve_file("index.html")
         if self.path.startswith("/static/"):
-            prefix = "/static/"
-            rel = self.path[len(prefix):] if self.path.startswith(prefix) else self.path
-            self.serve_file(rel)
-            return
-        if self.is_whep_path():
-            self.proxy_whep()
-            return
+            return self.serve_file(self.path[8:])
         self.send_error(404)
 
-    def do_POST(self):
-        if self.path == "/api/rover-command":
-            self.handle_rover_command()
-            return
+    def calib_A(self):
+        global A
+        A = latest_drone_local
+        ws_broadcast(f"CALIB_A,{A[0]},{A[1]}")
+        return self._ok("Saved A")
 
-        if self.path == "/api/recalibrate-yaw":
-            self.handle_recalibrate_yaw()
-            return
+    def calib_B(self):
+        global B
+        B = latest_drone_local
+        ws_broadcast(f"CALIB_B,{B[0]},{B[1]}")
+        return self._ok("Saved B")
 
-        if self.is_whep_path():
-            self.proxy_whep()
-            return
+    def calib_C(self):
+        global C
+        C = latest_drone_local
+        ws_broadcast(f"CALIB_C,{C[0]},{C[1]}")
+        return self._ok("Saved C")
 
-        if self.path == "/api/call-ugv":
-            self.handle_example_call()
-            return
+    def calib_finish(self):
+        global A,B,C,R,T,CALIBRATED
 
-        self.send_error(404)
+        if A is None or B is None or C is None:
+            return self._ok("ERR Missing A/B/C")
 
+        Ax,Ay,_ = A
+        Bx,By,_ = B
+        Cx,Cy,_ = C
 
-    def do_PATCH(self):
-        if self.is_whep_path():
-            self.proxy_whep()
-            return
-        self.send_error(404)
+        # Compute right (+X)
+        vx = (Bx-Ax, By-Ay)
+        ln = math.hypot(*vx)
+        ux = (vx[0]/ln, vx[1]/ln)
 
-    def is_whep_path(self):
-        p = self.path
-        return (
-            p.startswith("/whep/") or
-            p == "/drone/whep" or
-            p.startswith("/drone/whep/")
+        # Compute forward (+Y)
+        vy = (Cx-Ax, Cy-Ay)
+        ln = math.hypot(*vy)
+        uy = (vy[0]/ln, vy[1]/ln)
+
+        R = [
+            [ux[0], uy[0]],
+            [ux[1], uy[1]]
+        ]
+
+        T = (
+            -Ax*R[0][0] - Ay*R[0][1],
+            -Ax*R[1][0] - Ay*R[1][1]
         )
 
-    def serve_file(self, rel):
-        fpath = STATIC_DIR / rel
-        if not fpath.is_file():
-            self.send_error(404)
-            return
-        if fpath.suffix == ".html":
-            ctype = "text/html; charset=utf-8"
-        elif fpath.suffix == ".css":
-            ctype = "text/css; charset=utf-8"
-        elif fpath.suffix == ".js":
-            ctype = "application/javascript; charset=utf-8"
-        else:
-            ctype = "application/octet-stream"
-        with open(fpath, "rb") as f:
-            data = f.read()
+        CALIBRATED = True
+        ws_broadcast(f"CALIB_DONE,{R[0][0]},{R[0][1]},{R[1][0]},{R[1][1]},{T[0]},{T[1]}")
+        return self._ok("Calibration complete")
+
+    # ---------------------- ROVER COMMAND ----------------------
+    def send_rover_cmd(self):
+        length=int(self.headers.get("Content-Length",0))
+        raw=self.rfile.read(length)
+        payload=json.loads(raw.decode())
+        cmd=payload.get("cmd","")
+
+        sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+        sock.sendto(cmd.encode(),("192.168.8.2",5005))
+        sock.close()
+        return self._ok("Sent")
+
+    # ---------------------- UTIL ----------------------
+    def _ok(self,msg):
+        msg_b = msg.encode()
         self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", len(msg_b))
+        self.end_headers()
+        self.wfile.write(msg_b)
+
+    def serve_file(self,rel):
+        p=STATIC_DIR/rel
+        if not p.exists(): return self.send_error(404)
+        data=p.read_bytes()
+        mime={".html":"text/html",".css":"text/css",".js":"application/javascript"}.get(p.suffix,"application/octet-stream")
+        self.send_response(200)
+        self.send_header("Content-Type",mime)
+        self.send_header("Content-Length",len(data))
         self.end_headers()
         self.wfile.write(data)
 
-    def proxy_whep(self):
-        incoming = urllib.parse.urlsplit(self.path)
-        target_url = ORIGIN._replace(
-            path=incoming.path,
-            query=incoming.query or ""
-        ).geturl()
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        body = self.rfile.read(length) if length > 0 else None
-        conn = None
-        try:
-            if ORIGIN_SCHEME == "https":
-                conn = http.client.HTTPSConnection(ORIGIN_HOST, ORIGIN_PORT, timeout=20)
-            else:
-                conn = http.client.HTTPConnection(ORIGIN_HOST, ORIGIN_PORT, timeout=20)
-            conn.request(self.command, target_url, body=body, headers=filter_headers(self.headers))
-            resp = conn.getresponse()
-            self.send_response(resp.status, resp.reason)
-            for k, v in resp.getheaders():
-                if k.lower() in HOP_BY_HOP:
-                    continue
-                self.send_header(k, v)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            while True:
-                chunk = resp.read(65536)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-        except Exception as e:
-            self.send_error(502, "MediaMTX upstream error: %s" % e)
-        finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except:
-                    pass
+# ============================================================
+# VIO STREAMER (where the FIX happens)
+# ============================================================
 
-    def handle_example_call(self):
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        body = self.rfile.read(length) if length > 0 else b""
-        try:
-            payload = json.loads(body.decode("utf-8")) if body else {}
-        except:
-            payload = {}
-        resp = json.dumps({"ok": True, "message": "Python server received your request", "received": payload})
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(resp)))
-        self.end_headers()
-        self.wfile.write(resp.encode())
-    
-    def handle_recalibrate_yaw(self):
-        global INITIAL_YAW, INITIAL_X, INITIAL_Y
-        INITIAL_YAW = None  # reset and next VIO reading will set new zero
-        INITIAL_X = None
-        INITIAL_Y = None
-        resp = json.dumps({"ok": True, "message": "Yaw recalibrated"})
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(resp)))
-        self.end_headers()
-        self.wfile.write(resp.encode())
+pose_regex = re.compile(r"\|\s*([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\s+([-+]?\d*\.\d+|\d+)\|")
+rpy_regex = re.compile(
+    r"\|\s*[-0-9.]+\s+[-0-9.]+\s+[-0-9.]+\|\s*([-0-9.]+)\s+([-0-9.]+)\s+([-0-9.]+)\|"
+)
+quality_regex = re.compile(r"\|\s*\d+\s*\|\s*(\d+)%")
 
+INITIAL_X=None
+INITIAL_Y=None
+INITIAL_YAW=None
 
+def normalize_angle(a):
+    while a>180: a-=360
+    while a<-180: a+=360
+    return a
 
 def vio_streamer():
-    global INITIAL_YAW, INITIAL_X, INITIAL_Y
+    global latest_drone_local, INITIAL_X, INITIAL_Y, INITIAL_YAW, CALIBRATED
 
-    proc = subprocess.Popen(
-        VIO_CMD, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    vio = subprocess.Popen(
+        ["sudo","voxl-inspect-qvio"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         universal_newlines=True, bufsize=1
     )
+
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
     print("[VIO] Streaming...")
 
-    try:
-        while True:
-            line = proc.stdout.readline()
-            if not line:
-                break
-            line = line.strip()
+    while True:
+        line = vio.stdout.readline()
+        if not line: break
+        line=line.strip()
 
-            pose_match = pose_regex.search(line)
-            quality_match = quality_regex.search(line)
-            rpy_match = rpy_regex.search(line)
+        pose=pose_regex.search(line)
+        rpy=rpy_regex.search(line)
+        q=quality_regex.search(line)
 
-            # Extract yaw_raw
-            if rpy_match:
-                roll = float(rpy_match.group(1))
-                pitch = float(rpy_match.group(2))
-                yaw_raw = float(rpy_match.group(3))
+        if not pose or not rpy:
+            continue
+
+        raw_x=float(pose.group(1))
+        raw_y=float(pose.group(2))
+        yaw_raw=float(rpy.group(3))
+
+        if INITIAL_Y is None:
+            INITIAL_X=raw_x
+            INITIAL_Y=raw_y
+
+        if INITIAL_YAW is None:
+            if abs(yaw_raw)>0.1:
+                INITIAL_YAW=yaw_raw
             else:
-                yaw_raw = 0.0
+                continue
 
-           # Initialize yaw reference safely
-            if INITIAL_YAW is None:
-                if abs(yaw_raw) > 0.1:      # ignore zero / noise until VIO stabilizes
-                    INITIAL_YAW = yaw_raw
-                else:
-                    continue                # skip this frame until yaw is valid
-            
-            # Compute calibrated yaw
-            yaw = normalize_angle(yaw_raw - INITIAL_YAW)
+        dx = raw_x - INITIAL_X
+        dy = raw_y - INITIAL_Y
+        yaw = normalize_angle(yaw_raw - INITIAL_YAW)
 
-            # Initialize position reference
-            raw_x = float(pose_match.group(1))
-            raw_y = float(pose_match.group(2))
+        latest_drone_local = (dx, dy, yaw)
 
-            if INITIAL_X is None:
-                INITIAL_X = raw_x
-            if INITIAL_Y is None:
-                INITIAL_Y = raw_y
+        # ---- Compute world coords for UI only ----
+        if CALIBRATED:
+            world_x = R[0][0]*dx + R[0][1]*dy + T[0]
+            world_y = R[1][0]*dx + R[1][1]*dy + T[1]
+        else:
+            world_x, world_y = dx, dy
 
-            # Apply calibration
-            x = raw_x - INITIAL_X
-            y = raw_y - INITIAL_Y
+        ts=time.time()
+        quality = q.group(1) if q else "-"
 
-            ts = time.time()
-            quality = quality_match.group(1) if quality_match else "-"
+        # ------------------------------
+        # Send WORLD coords to UI
+        # ------------------------------
+        ws_broadcast(f"{ts:.3f},{world_x:.3f},{world_y:.3f},{yaw:.3f},{quality}")
 
-            packet = "%0.3f,%0.3f,%0.3f,%0.1f,%s" % (ts, x, y, yaw, quality)
+        # ------------------------------
+        # Send LOCAL coords to rover
+        # ------------------------------
+        rover_packet = f"{ts:.3f},{world_x:.3f},{world_y:.3f},{quality}"
+        udp.sendto(rover_packet.encode(), ("192.168.8.2", 5005))
 
-            ws_broadcast(packet)
-
-            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_sock.sendto(packet.encode(), ("192.168.8.2", 5005))
-
-    except Exception as e:
-        print("[VIO ERROR]", e)
-    finally:
-        try:
-            proc.terminate()
-        except PermissionError:
-            print("[VIO] Cannot terminate VIO subprocess (no permissions).")
-        except Exception as e:
-            print("[VIO] Terminate error:", e)
-
-
+# ============================================================
+# ROVER UDP LISTENER
+# ============================================================
 
 def rover_udp_listener():
-    """
-    Listen on UDP 5006 for rover pose packets and forward them to WebSocket clients.
-    Packets are expected in this format:
-        ROVER,x,y,o
-    """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", 5006))
-    print("[ROVER UDP] Listening on 0.0.0.0:5006")
+    global latest_rover_x, latest_rover_y, latest_rover_o
+
+    sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0",5006))
+    print("[ROVER] Listening on :5006")
 
     while True:
-        try:
-            data, addr = sock.recvfrom(1024)
-            msg = data.decode("utf-8", errors="ignore").strip()
-            # Example: "ROVER,-0.005,0.000,-3.071"
-            ws_broadcast(msg)
-        except Exception as e:
-            print("[ROVER UDP ERROR]", e)
+        msg,_=sock.recvfrom(1024)
+        msg=msg.decode().strip()
+
+        if msg.startswith("ROVER"):
+            p=msg.split(",")
+            latest_rover_x=float(p[1])
+            latest_rover_y=float(p[2])
+            latest_rover_o=float(p[3])
+
+        ws_broadcast(msg)
+
+# ============================================================
+# LOG THREAD
+# ============================================================
+
+def log_thread():
+    while True:
+        time.sleep(5)
+        dx,dy,yaw = latest_drone_local
+        print("\n===== STATUS =====")
+        print(f"Drone Local:   x={dx:.2f}, y={dy:.2f}, yaw={yaw:.2f}")
+        print(f"Rover:         x={latest_rover_x:.2f}, y={latest_rover_y:.2f}, o={latest_rover_o:.2f}")
+        print(f"R matrix:      {R}")
+        print(f"T vector:      {T}")
+        print("==================\n")
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    host, port = UI_LISTEN_ADDR.split(":")
-    httpd = ThreadingHTTPServer((host, int(port)), Handler)
-    print("UI listening on %s" % UI_LISTEN_ADDR)
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        httpd.server_close()
-        print("Stopped.")
+    host,port=UI_LISTEN_ADDR.split(":")
+    httpd=ThreadingHTTPServer((host,int(port)),Handler)
+    print("[HTTP] Listening on",UI_LISTEN_ADDR)
+    httpd.serve_forever()
 
-if __name__ == "__main__":
-    # WebSocket server for the browser
-    threading.Thread(target=start_ws_server, daemon=True).start()
-    # Drone VIO streamer (voxl-inspect-qvio)
-    threading.Thread(target=vio_streamer, daemon=True).start()
-    # NEW: Rover pose listener (UDP 5006 → WebSocket)
-    threading.Thread(target=rover_udp_listener, daemon=True).start()
-
-    # HTTP UI server
+if __name__=="__main__":
+    threading.Thread(target=start_ws_server,daemon=True).start()
+    threading.Thread(target=vio_streamer,daemon=True).start()
+    threading.Thread(target=rover_udp_listener,daemon=True).start()
+    threading.Thread(target=log_thread,daemon=True).start()
     main()

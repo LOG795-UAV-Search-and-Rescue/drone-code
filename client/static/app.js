@@ -18,7 +18,8 @@ let pc = null;
 let videoEl = null;
 let reconnectTimer = null;
 let closing = false;
-
+let worldOffsetX = 0;
+let worldOffsetY = 0;
 
 
 const RETRY_BASE_MS = 500;
@@ -98,6 +99,7 @@ async function stopWHEP() {
     } catch {}
 
     pc = null;
+
     if (videoEl && videoEl.srcObject) {
         try {
             videoEl.srcObject.getTracks().forEach(t => t.stop());
@@ -126,33 +128,27 @@ function scheduleReconnect() {
 // =====================================================
 let mapCanvas, ctx;
 
-let droneX = 0, droneY = 0, droneYaw = 0;;
-let roverX = 0, roverY = 0, roverO = 0;   // new
-
+let droneX = 0, droneY = 0, droneYaw = 0;
+let roverX = 0, roverY = 0, roverO = 0;
 
 const pixelsPerMeter = 150;
 
-// --- Convert world coords to canvas ---
 function worldToScreen(x, y) {
+    x = x + worldOffsetX;
+    y = y + worldOffsetY;
     return {
         x: mapCanvas.width / 2 + x * pixelsPerMeter,
         y: mapCanvas.height / 2 - y * pixelsPerMeter
     };
 }
 
-function recalibrateYaw() {
-    log("Recalibrating yaw…");
-    fetch("/api/recalibrate-yaw", {
-        method: "POST"
-    })
-    .then(r => r.json())
-    .then(j => {
-        log("Yaw recalibrated: " + j.message);
-    })
-    .catch(err => log("Recalibrate error: " + err.message));
+function screenToWorld(px, py) {
+    return {
+        x: (px - mapCanvas.width / 2) / pixelsPerMeter,
+        y: (mapCanvas.height / 2 - py) / pixelsPerMeter
+    };
 }
 
-// --- Rover triangle drawing ---
 function drawRoverTriangle(x, y, heading) {
     const pos = worldToScreen(x, y);
     const size = 15;
@@ -180,14 +176,13 @@ function drawDroneTriangle(x, y, yawDeg) {
     ctx.save();
     ctx.translate(pos.x, pos.y);
 
-    // Convert yaw (deg) → radians
     const rad = yawDeg * Math.PI / 180;
     ctx.rotate(rad);
 
     ctx.beginPath();
-    ctx.moveTo(0, -size);       // front
-    ctx.lineTo(size / 2, size); // rear right
-    ctx.lineTo(-size / 2, size);// rear left
+    ctx.moveTo(0, -size);
+    ctx.lineTo(size / 2, size);
+    ctx.lineTo(-size / 2, size);
     ctx.closePath();
 
     ctx.fillStyle = "cyan";
@@ -200,52 +195,13 @@ function drawMap() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
 
-    // ---- Drone ----
-    /*
-    const d = worldToScreen(droneX, droneY);
-    ctx.fillStyle = "cyan";
-    ctx.beginPath();
-    ctx.arc(d.x, d.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    */
-   drawDroneTriangle(droneX, droneY, droneYaw);
-    // ---- Rover ----
+    drawDroneTriangle(droneX, droneY, droneYaw);
     drawRoverTriangle(roverX, roverY, roverO);
-    
 }
 
 // =====================================================
-// HANDLE INCOMING PACKETS
+// SEND ROVER COMMAND
 // =====================================================
-function handlePacket(msg) {
-    if (msg.startsWith("ROVER")) {
-        const p = msg.split(",");
-        roverX = parseFloat(p[1]);
-        roverY = parseFloat(p[2]);
-        roverO = parseFloat(p[3]);
-        drawMap();
-        return;
-    }
-
-    // Drone VIO
-    const parts = msg.split(",");
-    if (parts.length >= 3) {
-        droneX = -parseFloat(parts[1]);
-        droneY = parseFloat(parts[2]);
-        droneYaw = parseFloat(parts[3]); 
-        drawMap();
-    }
-}
-
-// Convert screen click → world coords
-function screenToWorld(px, py) {
-    return {
-        x: (px - mapCanvas.width / 2) / pixelsPerMeter,
-        y: (mapCanvas.height / 2 - py) / pixelsPerMeter
-    };
-}
-
-// Send rover command
 function sendCmd(cmd) {
     log("SEND → " + cmd);
     fetch("/api/rover-command", {
@@ -256,10 +212,60 @@ function sendCmd(cmd) {
 }
 
 // =====================================================
+// CALIBRATION BUTTONS
+// =====================================================
+function sendCalib(path) {
+    fetch(path, { method: "POST" })
+        .then(r => r.text())
+        .then(t => log("[CALIB] " + t))
+        .catch(e => log("Calib error: " + e.message));
+}
+
+// =====================================================
+// WEBSOCKET HANDLING
+// =====================================================
+function handlePacket(msg) {
+
+    if (msg.startsWith("ROVER")) {
+        const p = msg.split(",");
+        roverX = parseFloat(p[1]);
+        roverY = parseFloat(p[2]);
+        roverO = parseFloat(p[3]);
+        drawMap();
+        return;
+    }
+    if (msg.startsWith("CALIB_DONE")) {
+        log("[CALIB] Calibration complete. Recentering map.");
+
+        // Recenter map so drone appears in middle
+        worldOffsetX = -droneX;
+        worldOffsetY = -droneY;
+
+        drawMap();
+        return;
+    }
+
+
+    if (msg.startsWith("CALIB_")) {
+        log(msg);
+        return;
+    }
+    
+
+    const parts = msg.split(",");
+    if (parts.length >= 4) {
+        droneX = parseFloat(parts[1]);
+        droneY = parseFloat(parts[2]);
+        droneYaw = parseFloat(parts[3]);
+        drawMap();
+    }
+}
+
+// =====================================================
 // INITIALIZATION
 // =====================================================
 window.addEventListener("DOMContentLoaded", () => {
-    // Video
+
     videoEl = $("video");
 
     $("connectBtn").addEventListener("click", () => {
@@ -269,41 +275,20 @@ window.addEventListener("DOMContentLoaded", () => {
             scheduleReconnect();
         });
     });
-    $("recalibrateBtn").addEventListener("click", () => {
-        recalibrateYaw();
-    });
+
     $("disconnectBtn").addEventListener("click", stopWHEP);
+    $("recalibrateBtn").addEventListener("click", () => sendCalib("/api/recalibrate-yaw"));
 
-    $("callUgvBtn").addEventListener("click", async () => {
-        log("Call UGV pressed");
-        try {
-            const r = await fetch("/api/call-ugv", { method: "POST" });
-            const j = await r.json();
-            log(`Server: ${j.message}`);
-        } catch (e) {
-            log(`Server error: ${e.message}`);
-        }
-    });
-
-    // AUTO CONNECT VIDEO
-    startWHEP().catch(err => {
-        log(`Auto-connect error: ${err.message}`);
-        scheduleReconnect();
-    });
+    // 3-point calibration
+    $("calibStart").addEventListener("click", () => sendCalib("/api/calib/start"));
+    $("calibRight").addEventListener("click", () => sendCalib("/api/calib/right"));
+    $("calibForward").addEventListener("click", () => sendCalib("/api/calib/forward"));
+    $("calibFinish").addEventListener("click", () => sendCalib("/api/calib/finish"));
 
     // MAP
     mapCanvas = $("mapCanvas");
     ctx = mapCanvas.getContext("2d");
 
-    // WebSocket for Drone + Rover data
-    let ws = new WebSocket("ws://" + window.location.hostname + ":8765");
-
-    ws.onmessage = (ev) => {
-        log("[WS] " + ev.data);
-        handlePacket(ev.data);
-    };
-
-    // Left click → GOTO
     mapCanvas.addEventListener("click", (e) => {
         const rect = mapCanvas.getBoundingClientRect();
         const px = e.clientX - rect.left;
@@ -316,12 +301,16 @@ window.addEventListener("DOMContentLoaded", () => {
         log(`CLICK → GOTO ${x}, ${y}`);
         sendCmd(`GOTO ${x} ${y}`);
     });
-    
+
+    // WebSocket
+    let ws = new WebSocket("ws://" + window.location.hostname + ":8765");
+    ws.onmessage = (ev) => handlePacket(ev.data);
+
+    // periodic logs
     setInterval(() => {
-    log(
-        `[INFO] DRONE  → x=${droneX.toFixed(2)}, y=${droneY.toFixed(2)}\n` +
-        `[INFO] ROVER  → x=${roverX.toFixed(2)}, y=${roverY.toFixed(2)}, o=${roverO.toFixed(2)}`
-        );
+        log(`[DRONE] x=${droneX.toFixed(2)}, y=${droneY.toFixed(2)}, yaw=${droneYaw.toFixed(1)}`);
+        log(`[ROVER] x=${roverX.toFixed(2)}, y=${roverY.toFixed(2)}, o=${roverO.toFixed(2)}`);
     }, 5000);
+
     drawMap();
 });

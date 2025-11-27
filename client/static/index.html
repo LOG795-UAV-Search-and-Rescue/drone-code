@@ -4,10 +4,10 @@
     <title>Drone + Rover Control UI</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+
     <link rel="stylesheet" href="/static/style.css">
 
     <style>
-        /* Map styles */
         #mapCanvas {
             background: #111;
             border: 1px solid #555;
@@ -49,29 +49,37 @@
     <!-- MAP + ROVER -->
     <section>
         <h2>Rover Map</h2>
+
         <canvas id="mapCanvas" width="600" height="600"></canvas>
 
         <div class="map-controls">
+
+            <!-- 3-Point Calibration -->
+            <button id="calibStart">Save A (Start)</button>
+            <button id="calibRight">Save B (Right)</button>
+            <button id="calibForward">Save C (Forward)</button>
+            <button id="calibFinish">Finish Calibration</button>
+
+            <!-- Drone Modes -->
             <button onclick="sendCmd('MODE_CONTINUOUS')">Continuous Follow</button>
             <button onclick="sendCmd('MODE_COME_TO_ME')">Come To Me Mode</button>
             <button onclick="sendCmd('CMD_COME_TO_ME')">Come To Me NOW</button>
 
-            <!-- NEW BUTTON -->
-            <button id="recalibrateBtn">Recalibrate Drone Yaw</button>
+            <!-- Recalibrate yaw -->
+            <button id="recalibrateBtn">Recalibrate Yaw</button>
         </div>
     </section>
 
-
     <!-- LOG -->
     <section class="actions">
-    <button id="callUgvBtn" class="primary">Call UGV Robot</button>
-    <pre id="log" class="log"></pre>
+        <button id="callUgvBtn" class="primary">Call UGV Robot</button>
+        <pre id="log" class="log"></pre>
     </section>
 
 </main>
 
 <footer>
-    <small>Drone + Rover UI by the best PFE team.</small>
+    <small>Drone + Rover UI — PFE Team</small>
 </footer>
 
 <script src="/static/app.js"></script>
