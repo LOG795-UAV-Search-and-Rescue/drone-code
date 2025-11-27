@@ -102,6 +102,16 @@ http://127.0.0.1:8889/whep
 ### IF ISSUES WITH CAMERA
 
 sudo systemctl restart mediamtx
+# TO CALIBRATE
+##  Place your drone on the origin point (its what ever you decide the origin is)
+  - Hit Save Point A
+  - Then Move the drone to the right and Hit Save Point B
+  - Move the Drone Back to Origin
+  - Then move the drone forward and Hit Save Point C
+  - Bring the drone back to the origin
+  - Then Finish Calibration
+### The Map will reset 
+Now when you mvoe the drone forward and to the sides the map will accuretly display it.
 
 
 > Made with care by [Adam Mihajlovic](https://github.com/Funnyadd), [Maxence Lord](https://github.com/ImprovUser) and [Raphaël Camara](https://github.com/RaphaelCamara) ❤️
