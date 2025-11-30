@@ -14,6 +14,7 @@ from socketserver import ThreadingMixIn
 from pathlib import Path
 import math
 
+
 # ============================================================
 # GLOBAL STATE
 # ============================================================
@@ -235,6 +236,26 @@ def normalize_angle(a):
     while a<-180: a+=360
     return a
 
+def restart_voxl_services():
+    print("[INIT] Restarting VOXL localization services...")
+    subprocess.call(["sudo", "systemctl", "restart",
+                     "voxl-qvio-server", "voxl-vision-px4", "voxl-px4"])
+
+    # Give the services a moment to reboot
+    time.sleep(5)
+
+    # Wait until QVIO is actually running again
+    print("[INIT] Waiting for voxl-qvio-server to come online...")
+    for i in range(20):
+        status = subprocess.getoutput("systemctl is-active voxl-qvio-server")
+        if "active" in status:
+            print("[INIT] QVIO is active.")
+            return
+        time.sleep(0.5)
+
+    print("[WARNING] QVIO did not become active in time.")
+
+
 def vio_streamer():
     global latest_drone_local, INITIAL_X, INITIAL_Y, INITIAL_YAW, CALIBRATED
 
@@ -350,6 +371,8 @@ def main():
     httpd.serve_forever()
 
 if __name__=="__main__":
+    restart_voxl_services()
+
     threading.Thread(target=start_ws_server,daemon=True).start()
     threading.Thread(target=vio_streamer,daemon=True).start()
     threading.Thread(target=rover_udp_listener,daemon=True).start()
