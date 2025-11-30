@@ -1,13 +1,13 @@
 // =====================================================
 // GLOBAL HELPERS
 // =====================================================
-const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id); // Helper function to get elements by ID
 
 function log(msg) {
-    const el = $("log");
-    const ts = new Date().toISOString().split("T")[1].replace("Z", "");
-    el.textContent += `[${ts}] ${msg}\n`;
-    el.scrollTop = el.scrollHeight;
+    const el = $("log"); // Get the log element
+    const ts = new Date().toISOString().split("T")[1].replace("Z", ""); // Get the current timestamp
+    el.textContent += `[${ts}] ${msg}\n`; // Append the log message with timestamp
+    el.scrollTop = el.scrollHeight; // Scroll to the bottom of the log
 }
 
 // =====================================================
@@ -21,7 +21,6 @@ let closing = false;
 let worldOffsetX = 0;
 let worldOffsetY = 0;
 
-
 const RETRY_BASE_MS = 500;
 const RETRY_MAX_MS = 5000;
 
@@ -31,10 +30,16 @@ function setBtns({ connected }) {
     $("disconnectBtn").disabled = !connected;
 }
 
+/**
+ * Starts the WHEP video stream.
+ */
 async function startWHEP() {
     closing = false;
     clearTimeout(reconnectTimer);
-    if (pc) await stopWHEP();
+    if (pc) {
+        // Handle existing peer connection
+        pc.close(); // Close existing connection if any
+    }
 
     setStatus("connecting...");
     setBtns({ connected: false });
@@ -58,29 +63,35 @@ async function startWHEP() {
         }
     };
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
 
-    await new Promise((resolve) => {
-        if (pc.iceGatheringState === "complete") return resolve();
-        pc.onicegatheringstatechange = () => {
-            if (pc.iceGatheringState === "complete") resolve();
-        };
-    });
+        await new Promise((resolve) => {
+            if (pc.iceGatheringState === "complete") return resolve();
+            pc.onicegatheringstatechange = () => {
+                if (pc.iceGatheringState === "complete") resolve();
+            };
+        });
 
-    const resp = await fetch(WHEP_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: pc.localDescription.sdp,
-    });
+        const resp = await fetch(WHEP_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/sdp" },
+            body: pc.localDescription.sdp,
+        });
 
-    if (!resp.ok) throw new Error(`WHEP HTTP ${resp.status}`);
-    const answerSDP = await resp.text();
-    await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
+        if (!resp.ok) throw new Error("Failed to establish WHEP session");
+        
+        const answerSDP = await resp.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
 
-    log("WHEP session established");
-    setStatus("connected");
-    setBtns({ connected: true });
+        log("WHEP session established");
+        setStatus("connected");
+        setBtns({ connected: true });
+    } catch (error) {
+        log(`Error: ${error.message}`);
+        setStatus("disconnected");
+    }
 }
 
 async function stopWHEP() {
@@ -134,11 +145,12 @@ let roverX = 0, roverY = 0, roverO = 0;
 const pixelsPerMeter = 150;
 
 function worldToScreen(x, y) {
-    x = x + worldOffsetX;
-    y = y + worldOffsetY;
+    // Convert world coordinates to screen coordinates
+    x = x + worldOffsetX; // Adjust for world offset
+    y = y + worldOffsetY; // Adjust for world offset
     return {
-        x: mapCanvas.width / 2 + x * pixelsPerMeter,
-        y: mapCanvas.height / 2 - y * pixelsPerMeter
+        x: mapCanvas.width / 2 + x * pixelsPerMeter, // Calculate screen x
+        y: mapCanvas.height / 2 - y * pixelsPerMeter // Calculate screen y
     };
 }
 

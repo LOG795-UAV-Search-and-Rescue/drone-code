@@ -26,6 +26,9 @@
         .map-controls button:hover {
             background: #4aa3ff;
         }
+        .calibration-controls, .drone-controls {
+            margin-bottom: 20px; /* Add space between groups */
+        }
     </style>
 </head>
 
@@ -54,19 +57,22 @@
 
         <div class="map-controls">
 
-            <!-- 3-Point Calibration -->
-            <button id="calibStart">Save A (Start)</button>
-            <button id="calibRight">Save B (Right)</button>
-            <button id="calibForward">Save C (Forward)</button>
-            <button id="calibFinish">Finish Calibration</button>
+            <div class="calibration-controls">
+                <!-- 3-Point Calibration -->
+                <button id="calibStart">Save A (Start)</button>
+                <button id="calibRight">Save B (Right)</button>
+                <button id="calibForward">Save C (Forward)</button>
+                <button id="calibFinish">Finish Calibration</button>
+            </div>
 
-            <!-- Drone Modes -->
-            <button onclick="sendCmd('MODE_CONTINUOUS')">Continuous Follow</button>
-            <button onclick="sendCmd('MODE_COME_TO_ME')">Come To Me Mode</button>
-            <button onclick="sendCmd('CMD_COME_TO_ME')">Come To Me NOW</button>
-
-            <!-- Recalibrate yaw -->
-            <button id="recalibrateBtn">Recalibrate Yaw</button>
+            <div class="drone-controls">
+                <!-- Drone Modes -->
+                <button onclick="sendCmd('MODE_CONTINUOUS')">Continuous Follow</button>
+                <button onclick="sendCmd('MODE_COME_TO_ME')">Come To Me Mode</button>
+                <button onclick="sendCmd('CMD_COME_TO_ME')">Come To Me NOW</button>
+                <!-- Recalibrate yaw -->
+                <button id="recalibrateBtn">Recalibrate Yaw</button>
+            </div>
         </div>
     </section>
 
