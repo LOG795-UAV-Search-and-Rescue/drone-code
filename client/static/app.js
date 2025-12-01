@@ -310,8 +310,8 @@ window.addEventListener("DOMContentLoaded", () => {
     const resizer = $("logResizer");
     let startY = 0;
     let startHeight = 0;
-    const MIN_HEIGHT = 60;
-    const MAX_HEIGHT = 400;
+    const MIN_HEIGHT = 100;
+    const MAX_HEIGHT = 800;
 
     resizer.addEventListener("mousedown", (e) => {
         e.preventDefault();

@@ -501,8 +501,7 @@ if __name__=="__main__":
         "--roverIp",
         "-ri",
         type=str,
-        defaul="192.168.8.2",
-        required=True,
+        default="192.168.8.2",
         help="IP address of the device"
     )
     args = parser.parse_args()
