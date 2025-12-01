@@ -14,15 +14,13 @@ function log(msg) {
 // VIDEO STREAM (WHEP)
 // =====================================================
 const WHEP_URL = "/drone/whep";
+const RETRY_BASE_MS = 500;
+const RETRY_MAX_MS = 5000;
+
 let pc = null;
 let videoEl = null;
 let reconnectTimer = null;
 let closing = false;
-let worldOffsetX = 0;
-let worldOffsetY = 0;
-
-const RETRY_BASE_MS = 500;
-const RETRY_MAX_MS = 5000;
 
 function setStatus(s) { $("status").textContent = s; }
 function setBtns({ connected }) {
@@ -36,10 +34,7 @@ function setBtns({ connected }) {
 async function startWHEP() {
     closing = false;
     clearTimeout(reconnectTimer);
-    if (pc) {
-        // Handle existing peer connection
-        pc.close(); // Close existing connection if any
-    }
+    if (pc) await stopWHEP();
 
     setStatus("connecting...");
     setBtns({ connected: false });
@@ -81,7 +76,6 @@ async function startWHEP() {
         });
 
         if (!resp.ok) throw new Error("Failed to establish WHEP session");
-        
         const answerSDP = await resp.text();
         await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
 
@@ -110,7 +104,6 @@ async function stopWHEP() {
     } catch {}
 
     pc = null;
-
     if (videoEl && videoEl.srcObject) {
         try {
             videoEl.srcObject.getTracks().forEach(t => t.stop());
@@ -236,6 +229,9 @@ function sendCalib(path) {
 // =====================================================
 // WEBSOCKET HANDLING
 // =====================================================
+let worldOffsetX = 0;
+let worldOffsetY = 0;
+
 function handlePacket(msg) {
 
     if (msg.startsWith("ROVER")) {
@@ -277,7 +273,6 @@ function handlePacket(msg) {
 // INITIALIZATION
 // =====================================================
 window.addEventListener("DOMContentLoaded", () => {
-
     videoEl = $("video");
 
     $("connectBtn").addEventListener("click", () => {
@@ -325,4 +320,10 @@ window.addEventListener("DOMContentLoaded", () => {
     }, 5000);
 
     drawMap();
+
+    // Auto-connect to WHEP stream on load
+    startWHEP().catch(err => {
+        log(`Auto-connect error: ${err.message}`);
+        scheduleReconnect();
+    });
 });
