@@ -487,13 +487,7 @@ def main():
     httpd = ThreadingHTTPServer((host, int(port)), Handler)
     print("[HTTP] Listening on", UI_LISTEN_ADDR)
    
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        httpd.server_close()
-        print("Stopped.")
+    httpd.serve_forever()
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
@@ -514,7 +508,7 @@ if __name__=="__main__":
     # Spawn the various service threads. I use daemon threads so it will exit cleanly
     # when the main thread (HTTP server) stops.
     threading.Thread(target=start_ws_server, daemon=True).start()
-    threading.Thread(target=vio_streamer, args=(args.roverIp), daemon=True).start()
+    threading.Thread(target=vio_streamer, args=(args.roverIp,), daemon=True).start()
     threading.Thread(target=rover_udp_listener, daemon=True).start()
     threading.Thread(target=log_thread, daemon=True).start()
     main()
