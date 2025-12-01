@@ -105,7 +105,7 @@ def start_ws_server():
 
 
 # ============================================================
-# HTTP SERVER (unchanged)
+# HTTP SERVER
 # ============================================================
 
 UI_LISTEN_ADDR = "0.0.0.0:8080"
@@ -113,8 +113,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 MEDIAMTX_ORIGIN = "http://127.0.0.1:8889"
 ORIGIN = urllib.parse.urlsplit(MEDIAMTX_ORIGIN)
+if ORIGIN.hostname is None:
+    raise RuntimeError("MEDIAMTX_ORIGIN must include a hostname")
+
 ORIGIN_HOST = ORIGIN.hostname
-ORIGIN_PORT = ORIGIN.port or 80
+ORIGIN_SCHEME = ORIGIN.scheme
+ORIGIN_PORT = ORIGIN.port or (443 if ORIGIN_SCHEME == "https" else 80)
 
 # Hop-by-hop headers we should drop when proxying - not used heavily, but good to know.
 HOP_BY_HOP = {
@@ -122,16 +126,30 @@ HOP_BY_HOP = {
     "te","trailers","transfer-encoding","upgrade"
 }
 
-def filter_headers(h):
-    # Filter out hop-by-hop and Host header to avoid proxy problems
-    return {k:v for k,v in h.items() if k.lower() not in HOP_BY_HOP and k.lower()!="host"}
-
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
-class Handler(BaseHTTPRequestHandler):
+def filter_headers(headers):
+    out = {}
+    for k, v in headers.items():
+        lk = k.lower()
+        if lk in HOP_BY_HOP or lk == "host":
+            continue
+        out[k] = v
+    return out
 
-    # ---------------------- CALIBRATION ----------------------
+class Handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        if self.is_whep_path():
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type,If-None-Match,If-Match")
+            self.end_headers()
+            return
+        self.send_response(204)
+        self.end_headers()
+
     def do_POST(self):
         # Map POST endpoints to handlers. Kept super explicit for clarity.
         if self.path == "/api/calib/start": return self.calib_A()
@@ -139,15 +157,30 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/calib/forward": return self.calib_C()
         if self.path == "/api/calib/finish": return self.calib_finish()
         if self.path == "/api/rover-command": return self.send_rover_cmd()
+        if self.is_whep_path(): return self.proxy_whep()
         self.send_error(404)
 
     def do_GET(self):
-        # Basic static file server for the UI. Not smart, but enough for the demo.
         if self.path in ("/","/index.html"):
             return self.serve_file("index.html")
         if self.path.startswith("/static/"):
             return self.serve_file(self.path[8:])
+        if self.is_whep_path():
+            return self.proxy_whep()
         self.send_error(404)
+    
+    def do_PATCH(self):
+        if self.is_whep_path():
+            return self.proxy_whep()
+        self.send_error(404)
+
+    def is_whep_path(self):
+        p = self.path
+        return (
+            p.startswith("/whep/") or
+            p == "/drone/whep" or
+            p.startswith("/drone/whep/")
+        )
 
     def calib_A(self):
         # Save the current drone local pose as calibration point A
@@ -210,7 +243,6 @@ class Handler(BaseHTTPRequestHandler):
         ws_broadcast(f"CALIB_DONE,{R[0][0]},{R[0][1]},{R[1][0]},{R[1][1]},{T[0]},{T[1]}")
         return self._ok("Calibration complete")
 
-    # ---------------------- ROVER COMMAND ----------------------
     def send_rover_cmd(self):
         # Receive JSON payloads (like {"cmd": "STOP"}), forward command via UDP to rover
         length=int(self.headers.get("Content-Length",0))
@@ -223,27 +255,73 @@ class Handler(BaseHTTPRequestHandler):
         sock.close()
         return self._ok("Sent")
 
-    # ---------------------- UTIL ----------------------
     def _ok(self,msg):
         # Helper: send a simple text response with status 200
         msg_b = msg.encode()
         self.send_response(200)
-        self.send_header("Content-Length", len(msg_b))
+        self.send_header("Content-Length", str(len(msg_b)))
         self.end_headers()
         self.wfile.write(msg_b)
 
     def serve_file(self,rel):
         # Serve a file from the static dir. No security checks — fine for our local dev use.
-        p=STATIC_DIR/rel
+        p = STATIC_DIR / rel
         if not p.exists(): return self.send_error(404)
-        data=p.read_bytes()
-        mime={".html":"text/html",".css":"text/css",".js":"application/javascript"}.get(p.suffix,"application/octet-stream")
+
+        data = p.read_bytes()
+        ctype = {
+            ".html": "text/html; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8"
+        }.get(p.suffix, "application/octet-stream")
+
         self.send_response(200)
-        self.send_header("Content-Type",mime)
-        self.send_header("Content-Length",len(data))
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+    
+    def proxy_whep(self):
+        incoming = urllib.parse.urlsplit(self.path)
+        target_url = ORIGIN._replace(
+            path=incoming.path,
+            query=incoming.query or ""
+        ).geturl()
 
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        body = self.rfile.read(length) if length > 0 else None
+
+        conn = None
+        try:
+            if ORIGIN_SCHEME == "https":
+                conn = http.client.HTTPSConnection(ORIGIN_HOST, ORIGIN_PORT, timeout=20)
+            else:
+                conn = http.client.HTTPConnection(ORIGIN_HOST, ORIGIN_PORT, timeout=20)
+
+            conn.request(self.command, target_url, body=body, headers=filter_headers(self.headers))
+            resp = conn.getresponse()
+
+            self.send_response(resp.status, resp.reason)
+            for k, v in resp.getheaders():
+                if k.lower() in HOP_BY_HOP:
+                    continue
+                self.send_header(k, v)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except Exception as e:
+            self.send_error(502, "MediaMTX upstream error: %s" % e)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 # ============================================================
 # VIO STREAMER (where the FIX happens)
@@ -402,10 +480,17 @@ def log_thread():
 # MAIN
 # ============================================================
 def main():
-    host,port=UI_LISTEN_ADDR.split(":")
-    httpd=ThreadingHTTPServer((host,int(port)),Handler)
+    host, port = UI_LISTEN_ADDR.split(":")
+    httpd=ThreadingHTTPServer((host, int(port)), Handler)
     print("[HTTP] Listening on",UI_LISTEN_ADDR)
-    httpd.serve_forever()
+   
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+        print("Stopped.")
 
 if __name__=="__main__":
     # On startup, restart QVIO services (needed for VOXL). Not ideal for dev workflow,
