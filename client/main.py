@@ -3,6 +3,7 @@ import json
 import http.client
 import urllib.parse
 import threading
+import argparse
 import subprocess
 import re
 import time
@@ -139,6 +140,8 @@ def filter_headers(headers):
     return out
 
 class Handler(BaseHTTPRequestHandler):
+    rover_ip = None
+
     def do_OPTIONS(self):
         if self.is_whep_path():
             self.send_response(204)
@@ -245,13 +248,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_rover_cmd(self):
         # Receive JSON payloads (like {"cmd": "STOP"}), forward command via UDP to rover
-        length=int(self.headers.get("Content-Length",0))
-        raw=self.rfile.read(length)
-        payload=json.loads(raw.decode())
-        cmd=payload.get("cmd","")
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        payload = json.loads(raw.decode())
+        cmd = payload.get("cmd", "")
 
-        sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-        sock.sendto(cmd.encode(),("192.168.8.2",5005))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(cmd.encode(), (self.rover_ip, 5005))
         sock.close()
         return self._ok("Sent")
 
@@ -365,13 +368,13 @@ def restart_voxl_services():
     # If not active by now we've got bigger problems (but the function will just continue).
 
 
-def vio_streamer():
+def vio_streamer(roverIp):
     # This is the meat: parse output, track initial offsets, compute local coords,
     # optionally map to world coords if calibration is done, then broadcast.
     global latest_drone_local, INITIAL_X, INITIAL_Y, INITIAL_YAW, CALIBRATED
 
     vio = subprocess.Popen(
-        ["sudo","voxl-inspect-qvio"],
+        ["sudo", "voxl-inspect-qvio"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         universal_newlines=True, bufsize=1
     )
@@ -392,19 +395,19 @@ def vio_streamer():
         if not pose or not rpy:
             continue
 
-        raw_x=float(pose.group(1))
-        raw_y=float(pose.group(2))
-        yaw_raw=float(rpy.group(3))
+        raw_x = float(pose.group(1))
+        raw_y = float(pose.group(2))
+        yaw_raw = float(rpy.group(3))
 
         # Initialize offsets from the first good reading
         if INITIAL_Y is None:
-            INITIAL_X=raw_x
-            INITIAL_Y=raw_y
+            INITIAL_X = raw_x
+            INITIAL_Y = raw_y
 
         if INITIAL_YAW is None:
             # yaw might be noisy at startup; don't set until it seems plausible
-            if abs(yaw_raw)>0.1:
-                INITIAL_YAW=yaw_raw
+            if abs(yaw_raw) > 0.1:
+                INITIAL_YAW = yaw_raw
             else:
                 continue
 
@@ -430,7 +433,7 @@ def vio_streamer():
 
         # Send LOCAL coords to rover (we use world_x here so rover and UI are consistent)
         rover_packet = f"{ts:.3f},{world_x:.3f},{world_y:.3f},{quality}"
-        udp.sendto(rover_packet.encode(), ("192.168.8.2", 5005))
+        udp.sendto(rover_packet.encode(), (roverIp, 5005))
 
 
 # ============================================================
@@ -450,10 +453,10 @@ def rover_udp_listener():
         msg=msg.decode().strip()
 
         if msg.startswith("ROVER"):
-            p=msg.split(",")
-            latest_rover_x=float(p[1])
-            latest_rover_y=float(p[2])
-            latest_rover_o=float(p[3])
+            p = msg.split(",")
+            latest_rover_x = float(p[1])
+            latest_rover_y = float(p[2])
+            latest_rover_o = float(p[3])
 
         # Rebroadcast all rover messages to UI
         ws_broadcast(msg)
@@ -481,8 +484,8 @@ def log_thread():
 # ============================================================
 def main():
     host, port = UI_LISTEN_ADDR.split(":")
-    httpd=ThreadingHTTPServer((host, int(port)), Handler)
-    print("[HTTP] Listening on",UI_LISTEN_ADDR)
+    httpd = ThreadingHTTPServer((host, int(port)), Handler)
+    print("[HTTP] Listening on", UI_LISTEN_ADDR)
    
     try:
         httpd.serve_forever()
@@ -493,14 +496,26 @@ def main():
         print("Stopped.")
 
 if __name__=="__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--roverIp",
+        "-ri",
+        type=str,
+        defaul="192.168.8.2",
+        required=True,
+        help="IP address of the device"
+    )
+    args = parser.parse_args()
+    Handler.rover_ip = args.roverIp
+
     # On startup, restart QVIO services (needed for VOXL). Not ideal for dev workflow,
     # but helps keep things consistent when running on the actual hardware.
     restart_voxl_services()
 
     # Spawn the various service threads. I use daemon threads so it will exit cleanly
     # when the main thread (HTTP server) stops.
-    threading.Thread(target=start_ws_server,daemon=True).start()
-    threading.Thread(target=vio_streamer,daemon=True).start()
-    threading.Thread(target=rover_udp_listener,daemon=True).start()
-    threading.Thread(target=log_thread,daemon=True).start()
+    threading.Thread(target=start_ws_server, daemon=True).start()
+    threading.Thread(target=vio_streamer, args=(args.roverIp), daemon=True).start()
+    threading.Thread(target=rover_udp_listener, daemon=True).start()
+    threading.Thread(target=log_thread, daemon=True).start()
     main()

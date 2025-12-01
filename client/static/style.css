@@ -170,6 +170,12 @@ button.primary:active:not(:disabled) {
     gap: 14px;
 }
 
+.actions-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .log {
     background: #0f141c;
     color: var(--muted);
@@ -185,7 +191,30 @@ button.primary:active:not(:disabled) {
     line-height: 1.3;
     transition: background 0.2s;
 }
-.log:hover { background: #141b26; }
+
+.log-resizer {
+    height: 8px;
+    margin-top: 4px;
+    cursor: ns-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.log-resizer::before {
+    content: "";
+    width: 40px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--border);
+    opacity: 0.7;
+    transition: var(--transition);
+}
+
+.log-resizer:hover::before {
+    opacity: 1;
+    background: var(--accent);
+}
 
 footer {
     color: var(--muted);

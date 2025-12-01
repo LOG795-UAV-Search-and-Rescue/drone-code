@@ -275,6 +275,67 @@ function handlePacket(msg) {
 window.addEventListener("DOMContentLoaded", () => {
     videoEl = $("video");
 
+    // COPY LOG BUTTON
+    const copyBtn = $("copyLogBtn");
+    const logEl = $("log");
+
+    copyBtn.addEventListener("click", async () => {
+        const text = logEl.textContent || "";
+        if (!text.trim()) return;
+
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                // Fallback for older browsers
+                const ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                document.body.removeChild(ta);
+            }
+
+            const original = copyBtn.textContent;
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => (copyBtn.textContent = original), 1200);
+        } catch (err) {
+            console.error("Failed to copy log:", err);
+        }
+    });
+
+    // LOG RESIZER (DRAG HANDLE) 
+    const resizer = $("logResizer");
+    let startY = 0;
+    let startHeight = 0;
+    const MIN_HEIGHT = 60;
+    const MAX_HEIGHT = 400;
+
+    resizer.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        startY = e.clientY;
+        startHeight = logEl.offsetHeight;
+
+        logEl.style.maxHeight = "none";
+
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", onMouseUp);
+    });
+
+    function onMouseMove(e) {
+        const dy = e.clientY - startY;
+        let newHeight = startHeight + dy;
+        newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, newHeight));
+        logEl.style.height = newHeight + "px";
+    }
+
+    function onMouseUp() {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+    }
+
     $("connectBtn").addEventListener("click", () => {
         startWHEP().catch(err => {
             log(`Connect error: ${err.message}`);
