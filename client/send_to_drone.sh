@@ -12,3 +12,5 @@ tar --exclude='.git' \
     -czf drone-ui-offline.tar.gz .
 
 scp drone-ui-offline.tar.gz voxl@192.168.8.1:/PFE/code
+
+rm -rf drone-ui-offline.tar.gz
